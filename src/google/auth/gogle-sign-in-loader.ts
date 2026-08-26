@@ -1,4 +1,4 @@
-import { GSI_CLIENT_URL } from "./constants.ts";
+import { GSI_CLIENT_URL } from "../constants.ts";
 
 export const GoogleSignInLoader = (() => {
   let loadPromise: Promise<void> | null = null;
@@ -15,7 +15,9 @@ export const GoogleSignInLoader = (() => {
         script.onload = () => resolve();
         script.onerror = () =>
           reject(
-            new Error(`Failed to load Google Sign-In script: ${GSI_CLIENT_URL}`),
+            new Error(
+              `Failed to load Google Sign-In script: ${GSI_CLIENT_URL}`,
+            ),
           );
         document.head.appendChild(script);
       });

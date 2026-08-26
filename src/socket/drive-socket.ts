@@ -1,5 +1,4 @@
-import { GoogleOAuth } from "../auth/google-oauth.ts";
-import { GoogleDriveClient } from "../drive/drive-client.ts";
+import { GoogleOAuth, GoogleDriveClient } from "../google";
 import { InvalidMimeError } from "../errors/invalid-mime-error.ts";
 import { MessageExistsError } from "../errors/message-exists-error.ts";
 import { generateMessageFileName } from "../messages/filename/generate-message-file-name.ts";

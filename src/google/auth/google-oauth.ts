@@ -1,4 +1,4 @@
-import { DRIVE_APPDATA_SCOPE } from "./constants.ts";
+import { DRIVE_APPDATA_SCOPE } from "../constants.ts";
 import { GoogleSignInLoader } from "./gogle-sign-in-loader.ts";
 
 export class GoogleOAuth {

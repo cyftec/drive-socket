@@ -1,11 +1,9 @@
-import { NotAuthenticatedError } from "../errors/not-authenticated-error.ts";
+import { NotAuthenticatedError } from "../../errors/not-authenticated-error.ts";
 import type { GoogleOAuth } from "../auth/google-oauth.ts";
-import type { FileMessageMetadata } from "../types/index.ts";
-import { encodeMultipart } from "../messages/multipart/encode-multipart.ts";
+import type { FileMessageMetadata } from "../../types/index.ts";
+import { encodeMultipart } from "../../messages/multipart/encode-multipart.ts";
 import { parseDriveError } from "./parse-drive-error.ts";
-
-const DRIVE_API = "https://www.googleapis.com/drive/v3";
-const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3";
+import { DRIVE_API, DRIVE_UPLOAD } from "../constants.ts";
 
 interface ListFilesResult {
   files?: FileMessageMetadata[];
