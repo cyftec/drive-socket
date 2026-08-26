@@ -1,20 +1,20 @@
-export interface MessageRef {
-  fileId: string;
-  fileName: string;
+export interface FileMessageMetadata {
+  id: string;
+  name: string;
   createdTime: string;
   mimeType: string;
-  size?: number;
+  size?: string;
 }
 
-export interface PushedMessage extends MessageRef {
-  payload: Blob;
+export interface FileMessage extends FileMessageMetadata {
+  fileBlob: Blob;
 }
 
 export interface DriveSocketConfig {
   clientId: string;
 }
 
-export type ReceiveAs = "metadata" | "payload";
+export type ReceiveAs = "file-message-metadata" | "file-message";
 
 export interface ReceiveOptions {
   as: ReceiveAs;
@@ -28,15 +28,7 @@ export interface PruneOptions {
 }
 
 export interface PruneResult {
-  deleted: MessageRef[];
+  deleted: FileMessageMetadata[];
   deletedCount: number;
   keptCount: number;
-}
-
-export interface DriveFileMetadata {
-  id: string;
-  name: string;
-  createdTime: string;
-  mimeType: string;
-  size?: string;
 }

@@ -1,14 +1,11 @@
 import { GoogleOAuth } from "../auth/google-oauth.ts";
-import { DriveClient } from "../drive/drive-client.ts";
+import { GoogleDriveClient } from "../drive/drive-client.ts";
 import { InvalidMimeError } from "../errors/invalid-mime-error.ts";
 import { MessageExistsError } from "../errors/message-exists-error.ts";
-import { toBlob } from "../messages/blob/to-blob.ts";
 import { generateMessageFileName } from "../messages/filename/generate-message-file-name.ts";
 import { isValidMimeType } from "../messages/mime/is-valid-mime-type.ts";
 import { mimeToExtension } from "../messages/mime/mime-to-extension.ts";
 import { sortByCreatedTimeDesc } from "../messages/parser/sort-by-created-time-desc.ts";
-import { toMessageRef } from "../messages/parser/to-message-ref.ts";
-import { toPushedMessage } from "../messages/parser/to-pushed-message.ts";
 import {
   baseMessageQuery,
   buildBeforeQuery,
@@ -16,20 +13,49 @@ import {
 } from "../messages/query-helpers.ts";
 import type {
   DriveSocketConfig,
-  MessageRef,
+  FileMessage,
+  FileMessageMetadata,
   PruneOptions,
   PruneResult,
-  PushedMessage,
   ReceiveOptions,
 } from "../types/index.ts";
 
 export class DriveSocket {
   private readonly oauth: GoogleOAuth;
-  private readonly client: DriveClient;
+  private readonly gDriveClient: GoogleDriveClient;
+
+  private async collectFileMessageMetadata(
+    query: string,
+    orderBy?: string,
+  ): Promise<FileMessageMetadata[]> {
+    const metadata: FileMessageMetadata[] = [];
+    let pageToken: string | undefined;
+    do {
+      const result = await this.gDriveClient.downloadFiles(query, {
+        pageToken,
+        orderBy,
+      });
+      for (const file of result.files ?? []) metadata.push(file);
+      pageToken = result.nextPageToken;
+    } while (pageToken);
+    return metadata;
+  }
+
+  private async deleteFileMessageMetadata(
+    metadata: FileMessageMetadata[],
+    dryRun?: boolean,
+    keptCount = 0,
+  ): Promise<PruneResult> {
+    if (dryRun) {
+      return { deleted: metadata, deletedCount: metadata.length, keptCount };
+    }
+    for (const file of metadata) await this.gDriveClient.deleteFile(file.id);
+    return { deleted: metadata, deletedCount: metadata.length, keptCount };
+  }
 
   constructor(config: DriveSocketConfig) {
     this.oauth = new GoogleOAuth(config.clientId);
-    this.client = new DriveClient(this.oauth);
+    this.gDriveClient = new GoogleDriveClient(this.oauth);
   }
 
   connect(): Promise<void> {
@@ -45,117 +71,92 @@ export class DriveSocket {
   }
 
   async push(
-    data: Blob | ArrayBuffer | Uint8Array,
+    fileBlob: Blob,
     options: { mimeType: string },
-  ): Promise<PushedMessage> {
+  ): Promise<FileMessage> {
     const { mimeType } = options;
     if (!isValidMimeType(mimeType)) {
       throw new InvalidMimeError(mimeType, "must match type/subtype format");
     }
     const fileName = generateMessageFileName(mimeToExtension(mimeType));
-    if (await this.client.appDataFileExists(fileName)) {
+    if (await this.gDriveClient.fileExists(fileName)) {
       throw new MessageExistsError(fileName);
     }
-    const content = toBlob(data, mimeType);
-    const file = await this.client.createAppDataFile(
+    const metadata = await this.gDriveClient.saveNewFile(
       fileName,
       mimeType,
-      content,
+      fileBlob,
     );
-    return toPushedMessage(file, content);
+    return { ...metadata, fileBlob };
   }
 
   async receive(
-    options: ReceiveOptions & { as: "metadata" },
-  ): Promise<MessageRef[]>;
+    options: ReceiveOptions & { as: "file-message-metadata" },
+  ): Promise<FileMessageMetadata[]>;
   async receive(
-    options: ReceiveOptions & { as: "payload" },
-  ): Promise<PushedMessage[]>;
+    options: ReceiveOptions & { as: "file-message" },
+  ): Promise<FileMessage[]>;
   async receive(
     options: ReceiveOptions,
-  ): Promise<MessageRef[] | PushedMessage[]> {
-    const refs = sortByCreatedTimeDesc(
-      await this.collectMessageRefs(
+  ): Promise<FileMessageMetadata[] | FileMessage[]> {
+    const metadataList = sortByCreatedTimeDesc(
+      await this.collectFileMessageMetadata(
         buildReceiveQuery(options),
         "createdTime desc",
       ),
     );
-    const selected = options.limit ? refs.slice(0, options.limit) : refs;
+    const selectedMetadataList = options.limit
+      ? metadataList.slice(0, options.limit)
+      : metadataList;
 
-    if (options.as === "metadata") return selected;
+    if (options.as === "file-message-metadata") return selectedMetadataList;
 
-    const messages: PushedMessage[] = [];
-    for (const ref of selected) {
-      const payload = await this.client.downloadAppDataFile(ref.fileId);
-      messages.push({ ...ref, payload });
+    const messages: FileMessage[] = [];
+    for (const metadata of selectedMetadataList) {
+      const fileBlob = await this.gDriveClient.downloadFile(metadata.id);
+      messages.push({ ...metadata, fileBlob });
     }
     return messages;
   }
 
-  async getById(fileId: string): Promise<PushedMessage> {
-    const response = await this.client.request(
+  async getById(fileId: string): Promise<FileMessage> {
+    const response = await this.gDriveClient.request(
       `/files/${fileId}?fields=id,name,createdTime,mimeType,size`,
     );
-    const file = await response.json();
-    const body = await this.client.downloadAppDataFile(fileId);
-    return toPushedMessage(file, body);
+    const metadata = (await response.json()) as FileMessageMetadata;
+    const fileBlob = await this.gDriveClient.downloadFile(fileId);
+    return { ...metadata, fileBlob };
   }
 
   async pruneByCount(
     options: { keep: number } & PruneOptions,
   ): Promise<PruneResult> {
     if (options.keep < 0) throw new RangeError("keep must be >= 0");
-    const refs = sortByCreatedTimeDesc(
-      await this.collectMessageRefs(baseMessageQuery(), "createdTime desc"),
+    const metadata = sortByCreatedTimeDesc(
+      await this.collectFileMessageMetadata(
+        baseMessageQuery(),
+        "createdTime desc",
+      ),
     );
-    const toDelete = refs.slice(options.keep);
-    return this.deleteMessageRefs(
+    const toDelete = metadata.slice(options.keep);
+    return this.deleteFileMessageMetadata(
       toDelete,
       options.dryRun,
-      refs.length - toDelete.length,
+      metadata.length - toDelete.length,
     );
   }
 
   async pruneBefore(
     options: { before: Date } & PruneOptions,
   ): Promise<PruneResult> {
-    const all = await this.collectMessageRefs(baseMessageQuery());
-    const toDelete = await this.collectMessageRefs(
+    const all = await this.collectFileMessageMetadata(baseMessageQuery());
+    const toDelete = await this.collectFileMessageMetadata(
       buildBeforeQuery(options.before),
     );
-    return this.deleteMessageRefs(
+    return this.deleteFileMessageMetadata(
       toDelete,
       options.dryRun,
       all.length - toDelete.length,
     );
-  }
-
-  private async collectMessageRefs(
-    query: string,
-    orderBy?: string,
-  ): Promise<MessageRef[]> {
-    const refs: MessageRef[] = [];
-    let pageToken: string | undefined;
-    do {
-      const result = await this.client.listAppDataFiles(query, {
-        pageToken,
-        orderBy,
-      });
-      for (const file of result.files ?? []) refs.push(toMessageRef(file));
-      pageToken = result.nextPageToken;
-    } while (pageToken);
-    return refs;
-  }
-
-  private async deleteMessageRefs(
-    refs: MessageRef[],
-    dryRun?: boolean,
-    keptCount = 0,
-  ): Promise<PruneResult> {
-    if (dryRun) {
-      return { deleted: refs, deletedCount: refs.length, keptCount };
-    }
-    for (const ref of refs) await this.client.deleteAppDataFile(ref.fileId);
-    return { deleted: refs, deletedCount: refs.length, keptCount };
   }
 }

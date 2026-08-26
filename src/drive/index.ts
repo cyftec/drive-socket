@@ -1,1 +1,1 @@
-export { DriveClient } from './drive-client.ts';
+export { GoogleDriveClient } from "./drive-client.ts";
