@@ -3,28 +3,15 @@ import { GoogleSignInLoader } from "./gogle-sign-in-loader.ts";
 
 export class GoogleOAuth {
   private token: string | null = null;
-  private readonly clientId: string;
-  private readonly googleSignInScriptUrl?: string;
-  private readonly onTokenChange?: (token: string | null) => void;
 
-  constructor(
-    clientId: string,
-    options?: {
-      googleSignInScriptUrl?: string;
-      onTokenChange?: (token: string | null) => void;
-    },
-  ) {
-    this.clientId = clientId;
-    this.googleSignInScriptUrl = options?.googleSignInScriptUrl;
-    this.onTokenChange = options?.onTokenChange;
-  }
+  constructor(private readonly clientId: string) {}
 
   getAccessToken(): string | null {
     return this.token;
   }
 
   async connect(): Promise<void> {
-    await GoogleSignInLoader.load(this.googleSignInScriptUrl);
+    await GoogleSignInLoader.load();
     await new Promise<void>((resolve, reject) => {
       const client = google.accounts.oauth2.initTokenClient({
         client_id: this.clientId,
@@ -43,7 +30,7 @@ export class GoogleOAuth {
             reject(new Error("drive.appdata scope not granted"));
             return;
           }
-          this.setToken(response.access_token);
+          this.token = response.access_token;
           resolve();
         },
       });
@@ -56,14 +43,9 @@ export class GoogleOAuth {
     if (!token) return;
     await new Promise<void>((resolve) => {
       google.accounts.oauth2.revoke(token, () => {
-        this.setToken(null);
+        this.token = null;
         resolve();
       });
     });
-  }
-
-  private setToken(token: string | null): void {
-    this.token = token;
-    this.onTokenChange?.(token);
   }
 }

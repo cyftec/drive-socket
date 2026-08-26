@@ -34,8 +34,6 @@ export type PushedMessage<T = unknown> =
 
 export interface DriveSocketConfig {
   clientId: string;
-  googleSignInScriptUrl?: string;
-  onTokenChange?: (token: string | null) => void;
 }
 
 export interface ListOptions {
