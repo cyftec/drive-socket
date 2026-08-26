@@ -6,7 +6,6 @@ import { toBlob } from "../messages/blob/to-blob.ts";
 import { generateMessageFileName } from "../messages/filename/generate-message-file-name.ts";
 import { isValidMimeType } from "../messages/mime/is-valid-mime-type.ts";
 import { mimeToExtension } from "../messages/mime/mime-to-extension.ts";
-import { filterByKind } from "../messages/parser/filter-by-kind.ts";
 import { sortByCreatedTimeDesc } from "../messages/parser/sort-by-created-time-desc.ts";
 import { toMessageRef } from "../messages/parser/to-message-ref.ts";
 import { toPushedMessage } from "../messages/parser/to-pushed-message.ts";
@@ -22,8 +21,6 @@ import type {
   PruneOptions,
   PruneResult,
   PushedMessage,
-  PushedMessageFile,
-  PushedMessageJson,
 } from "../types/index.ts";
 
 export class DriveSocket {
@@ -47,32 +44,11 @@ export class DriveSocket {
     return this.oauth.getAccessToken() !== null;
   }
 
-  async pushJson<T>(payload: T): Promise<PushedMessageJson<T>> {
-    const fileName = generateMessageFileName("json");
-    if (await this.client.appDataFileExists(fileName)) {
-      throw new MessageExistsError(fileName);
-    }
-    const content = new Blob([JSON.stringify(payload)], {
-      type: "application/json",
-    });
-    const file = await this.client.createAppDataFile(
-      fileName,
-      "application/json",
-      content,
-    );
-    const message = await toPushedMessage<T>(file, content);
-    if (message.kind !== "json") throw new Error("Expected JSON message");
-    return message;
-  }
-
-  async pushFile(
+  async push(
     data: Blob | ArrayBuffer | Uint8Array,
     options: { mimeType: string },
-  ): Promise<PushedMessageFile> {
+  ): Promise<PushedMessage> {
     const { mimeType } = options;
-    if (mimeType === "application/json") {
-      throw new InvalidMimeError(mimeType, "use pushJson() for JSON payloads");
-    }
     if (!isValidMimeType(mimeType)) {
       throw new InvalidMimeError(mimeType, "must match type/subtype format");
     }
@@ -86,12 +62,10 @@ export class DriveSocket {
       mimeType,
       content,
     );
-    const message = await toPushedMessage(file, content);
-    if (message.kind !== "file") throw new Error("Expected file message");
-    return message;
+    return toPushedMessage(file, content);
   }
 
-  async getLatest<T = unknown>(): Promise<PushedMessage<T> | null> {
+  async getLatest(): Promise<PushedMessage | null> {
     const result = await this.client.listAppDataFiles(baseMessageQuery(), {
       pageSize: 1,
       orderBy: "createdTime desc",
@@ -99,7 +73,7 @@ export class DriveSocket {
     const file = result.files?.[0];
     if (!file) return null;
     const body = await this.client.downloadAppDataFile(file.id);
-    return toPushedMessage<T>(file, body);
+    return toPushedMessage(file, body);
   }
 
   async list(options?: ListOptions): Promise<MessageRef[]> {
@@ -107,18 +81,17 @@ export class DriveSocket {
       buildListQuery(options),
       "createdTime desc",
     );
-    const filtered = filterByKind(refs, options?.kind);
-    const sorted = sortByCreatedTimeDesc(filtered);
+    const sorted = sortByCreatedTimeDesc(refs);
     return options?.limit ? sorted.slice(0, options.limit) : sorted;
   }
 
-  async getById<T = unknown>(fileId: string): Promise<PushedMessage<T>> {
+  async getById(fileId: string): Promise<PushedMessage> {
     const response = await this.client.request(
       `/files/${fileId}?fields=id,name,createdTime,mimeType,size`,
     );
     const file = await response.json();
     const body = await this.client.downloadAppDataFile(fileId);
-    return toPushedMessage<T>(file, body);
+    return toPushedMessage(file, body);
   }
 
   async pruneByCount(
@@ -126,10 +99,7 @@ export class DriveSocket {
   ): Promise<PruneResult> {
     if (options.keep < 0) throw new RangeError("keep must be >= 0");
     const refs = sortByCreatedTimeDesc(
-      filterByKind(
-        await this.collectMessageRefs(baseMessageQuery(), "createdTime desc"),
-        options.kind,
-      ),
+      await this.collectMessageRefs(baseMessageQuery(), "createdTime desc"),
     );
     const toDelete = refs.slice(options.keep);
     return this.deleteMessageRefs(
@@ -142,13 +112,9 @@ export class DriveSocket {
   async pruneBefore(
     options: { before: Date } & PruneOptions,
   ): Promise<PruneResult> {
-    const all = filterByKind(
-      await this.collectMessageRefs(baseMessageQuery()),
-      options.kind,
-    );
-    const toDelete = filterByKind(
-      await this.collectMessageRefs(buildBeforeQuery(options.before)),
-      options.kind,
+    const all = await this.collectMessageRefs(baseMessageQuery());
+    const toDelete = await this.collectMessageRefs(
+      buildBeforeQuery(options.before),
     );
     return this.deleteMessageRefs(
       toDelete,
