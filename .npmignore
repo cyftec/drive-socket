@@ -1,0 +1,23 @@
+# Dev / CI
+tests/
+.cursor/
+.github/
+
+# TypeScript / tooling
+tsconfig*.json
+bun.lock
+*.tsbuildinfo
+
+# Git / editor
+.git/
+.gitignore
+.idea/
+.vscode/
+.DS_Store
+
+# Env, caches, artifacts
+.env*
+coverage/
+node_modules/
+*.tgz
+*.log
