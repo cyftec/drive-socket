@@ -1,5 +1,10 @@
 import { InvalidMimeError, MessageExistsError } from "../errors";
-import { GoogleDriveClient, GoogleOAuth } from "../google";
+import {
+  GoogleDriveClient,
+  GoogleOAuth,
+  isValidMimeType,
+  mimeToExtension,
+} from "../google";
 import type {
   DriveSocketConfig,
   FileMessage,
@@ -13,8 +18,6 @@ import {
   buildBeforeQuery,
   buildReceiveQuery,
   generateMessageFileName,
-  isValidMimeType,
-  mimeToExtension,
   sortByCreatedTimeDesc,
 } from "./utils";
 
