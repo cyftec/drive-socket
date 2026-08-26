@@ -14,7 +14,10 @@ export interface DriveSocketConfig {
   clientId: string;
 }
 
-export interface ListOptions {
+export type ReceiveAs = "metadata" | "payload";
+
+export interface ReceiveOptions {
+  as: ReceiveAs;
   since?: Date;
   until?: Date;
   limit?: number;

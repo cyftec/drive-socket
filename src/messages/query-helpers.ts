@@ -1,4 +1,4 @@
-import type { ListOptions } from "../types";
+import type { ReceiveOptions } from "../types";
 
 export function baseMessageQuery(): string {
   return "name contains 'msg-' and trashed=false";
@@ -8,7 +8,9 @@ export function buildBeforeQuery(before: Date): string {
   return `${baseMessageQuery()} and createdTime < '${before.toISOString()}'`;
 }
 
-export function buildListQuery(options?: ListOptions): string {
+export function buildReceiveQuery(
+  options?: Pick<ReceiveOptions, "since" | "until">,
+): string {
   const query = baseMessageQuery();
 
   return options?.since

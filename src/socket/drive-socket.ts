@@ -12,15 +12,15 @@ import { toPushedMessage } from "../messages/parser/to-pushed-message.ts";
 import {
   baseMessageQuery,
   buildBeforeQuery,
-  buildListQuery,
+  buildReceiveQuery,
 } from "../messages/query-helpers.ts";
 import type {
   DriveSocketConfig,
-  ListOptions,
   MessageRef,
   PruneOptions,
   PruneResult,
   PushedMessage,
+  ReceiveOptions,
 } from "../types/index.ts";
 
 export class DriveSocket {
@@ -65,24 +65,31 @@ export class DriveSocket {
     return toPushedMessage(file, content);
   }
 
-  async getLatest(): Promise<PushedMessage | null> {
-    const result = await this.client.listAppDataFiles(baseMessageQuery(), {
-      pageSize: 1,
-      orderBy: "createdTime desc",
-    });
-    const file = result.files?.[0];
-    if (!file) return null;
-    const body = await this.client.downloadAppDataFile(file.id);
-    return toPushedMessage(file, body);
-  }
-
-  async list(options?: ListOptions): Promise<MessageRef[]> {
-    const refs = await this.collectMessageRefs(
-      buildListQuery(options),
-      "createdTime desc",
+  async receive(
+    options: ReceiveOptions & { as: "metadata" },
+  ): Promise<MessageRef[]>;
+  async receive(
+    options: ReceiveOptions & { as: "payload" },
+  ): Promise<PushedMessage[]>;
+  async receive(
+    options: ReceiveOptions,
+  ): Promise<MessageRef[] | PushedMessage[]> {
+    const refs = sortByCreatedTimeDesc(
+      await this.collectMessageRefs(
+        buildReceiveQuery(options),
+        "createdTime desc",
+      ),
     );
-    const sorted = sortByCreatedTimeDesc(refs);
-    return options?.limit ? sorted.slice(0, options.limit) : sorted;
+    const selected = options.limit ? refs.slice(0, options.limit) : refs;
+
+    if (options.as === "metadata") return selected;
+
+    const messages: PushedMessage[] = [];
+    for (const ref of selected) {
+      const payload = await this.client.downloadAppDataFile(ref.fileId);
+      messages.push({ ...ref, payload });
+    }
+    return messages;
   }
 
   async getById(fileId: string): Promise<PushedMessage> {
