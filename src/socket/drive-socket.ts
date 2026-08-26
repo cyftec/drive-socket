@@ -10,9 +10,11 @@ import { filterByKind } from "../messages/parser/filter-by-kind.ts";
 import { sortByCreatedTimeDesc } from "../messages/parser/sort-by-created-time-desc.ts";
 import { toMessageRef } from "../messages/parser/to-message-ref.ts";
 import { toPushedMessage } from "../messages/parser/to-pushed-message.ts";
-import { baseMessageQuery } from "../messages/query/base-message-query.ts";
-import { buildBeforeQuery } from "../messages/query/build-before-query.ts";
-import { buildListQuery } from "../messages/query/build-list-query.ts";
+import {
+  baseMessageQuery,
+  buildBeforeQuery,
+  buildListQuery,
+} from "../messages/query-helpers.ts";
 import type {
   DriveSocketConfig,
   ListOptions,
@@ -50,8 +52,14 @@ export class DriveSocket {
     if (await this.client.appDataFileExists(fileName)) {
       throw new MessageExistsError(fileName);
     }
-    const content = new Blob([JSON.stringify(payload)], { type: "application/json" });
-    const file = await this.client.createAppDataFile(fileName, "application/json", content);
+    const content = new Blob([JSON.stringify(payload)], {
+      type: "application/json",
+    });
+    const file = await this.client.createAppDataFile(
+      fileName,
+      "application/json",
+      content,
+    );
     const message = await toPushedMessage<T>(file, content);
     if (message.kind !== "json") throw new Error("Expected JSON message");
     return message;
@@ -73,7 +81,11 @@ export class DriveSocket {
       throw new MessageExistsError(fileName);
     }
     const content = toBlob(data, mimeType);
-    const file = await this.client.createAppDataFile(fileName, mimeType, content);
+    const file = await this.client.createAppDataFile(
+      fileName,
+      mimeType,
+      content,
+    );
     const message = await toPushedMessage(file, content);
     if (message.kind !== "file") throw new Error("Expected file message");
     return message;
@@ -91,7 +103,10 @@ export class DriveSocket {
   }
 
   async list(options?: ListOptions): Promise<MessageRef[]> {
-    const refs = await this.collectMessageRefs(buildListQuery(options), "createdTime desc");
+    const refs = await this.collectMessageRefs(
+      buildListQuery(options),
+      "createdTime desc",
+    );
     const filtered = filterByKind(refs, options?.kind);
     const sorted = sortByCreatedTimeDesc(filtered);
     return options?.limit ? sorted.slice(0, options.limit) : sorted;
@@ -106,7 +121,9 @@ export class DriveSocket {
     return toPushedMessage<T>(file, body);
   }
 
-  async pruneByCount(options: { keep: number } & PruneOptions): Promise<PruneResult> {
+  async pruneByCount(
+    options: { keep: number } & PruneOptions,
+  ): Promise<PruneResult> {
     if (options.keep < 0) throw new RangeError("keep must be >= 0");
     const refs = sortByCreatedTimeDesc(
       filterByKind(
@@ -115,23 +132,42 @@ export class DriveSocket {
       ),
     );
     const toDelete = refs.slice(options.keep);
-    return this.deleteMessageRefs(toDelete, options.dryRun, refs.length - toDelete.length);
+    return this.deleteMessageRefs(
+      toDelete,
+      options.dryRun,
+      refs.length - toDelete.length,
+    );
   }
 
-  async pruneBefore(options: { before: Date } & PruneOptions): Promise<PruneResult> {
-    const all = filterByKind(await this.collectMessageRefs(baseMessageQuery()), options.kind);
+  async pruneBefore(
+    options: { before: Date } & PruneOptions,
+  ): Promise<PruneResult> {
+    const all = filterByKind(
+      await this.collectMessageRefs(baseMessageQuery()),
+      options.kind,
+    );
     const toDelete = filterByKind(
       await this.collectMessageRefs(buildBeforeQuery(options.before)),
       options.kind,
     );
-    return this.deleteMessageRefs(toDelete, options.dryRun, all.length - toDelete.length);
+    return this.deleteMessageRefs(
+      toDelete,
+      options.dryRun,
+      all.length - toDelete.length,
+    );
   }
 
-  private async collectMessageRefs(query: string, orderBy?: string): Promise<MessageRef[]> {
+  private async collectMessageRefs(
+    query: string,
+    orderBy?: string,
+  ): Promise<MessageRef[]> {
     const refs: MessageRef[] = [];
     let pageToken: string | undefined;
     do {
-      const result = await this.client.listAppDataFiles(query, { pageToken, orderBy });
+      const result = await this.client.listAppDataFiles(query, {
+        pageToken,
+        orderBy,
+      });
       for (const file of result.files ?? []) refs.push(toMessageRef(file));
       pageToken = result.nextPageToken;
     } while (pageToken);
