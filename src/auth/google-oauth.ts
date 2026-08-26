@@ -1,18 +1,21 @@
-import { DRIVE_APPDATA_SCOPE } from './drive-appdata-scope.ts';
-import { GisLoader } from './gis-loader.ts';
+import { DRIVE_APPDATA_SCOPE } from "./constants.ts";
+import { GoogleSignInLoader } from "./gogle-sign-in-loader.ts";
 
 export class GoogleOAuth {
   private token: string | null = null;
   private readonly clientId: string;
-  private readonly gisScriptUrl?: string;
+  private readonly googleSignInScriptUrl?: string;
   private readonly onTokenChange?: (token: string | null) => void;
 
   constructor(
     clientId: string,
-    options?: { gisScriptUrl?: string; onTokenChange?: (token: string | null) => void },
+    options?: {
+      googleSignInScriptUrl?: string;
+      onTokenChange?: (token: string | null) => void;
+    },
   ) {
     this.clientId = clientId;
-    this.gisScriptUrl = options?.gisScriptUrl;
+    this.googleSignInScriptUrl = options?.googleSignInScriptUrl;
     this.onTokenChange = options?.onTokenChange;
   }
 
@@ -21,18 +24,23 @@ export class GoogleOAuth {
   }
 
   async connect(): Promise<void> {
-    await GisLoader.load(this.gisScriptUrl);
+    await GoogleSignInLoader.load(this.googleSignInScriptUrl);
     await new Promise<void>((resolve, reject) => {
       const client = google.accounts.oauth2.initTokenClient({
         client_id: this.clientId,
         scope: DRIVE_APPDATA_SCOPE,
         callback: (response: google.accounts.oauth2.TokenResponse) => {
           if (response.error || !response.access_token) {
-            reject(new Error(response.error ?? 'OAuth failed'));
+            reject(new Error(response.error ?? "OAuth failed"));
             return;
           }
-          if (!google.accounts.oauth2.hasGrantedAllScopes(response, DRIVE_APPDATA_SCOPE)) {
-            reject(new Error('drive.appdata scope not granted'));
+          if (
+            !google.accounts.oauth2.hasGrantedAllScopes(
+              response,
+              DRIVE_APPDATA_SCOPE,
+            )
+          ) {
+            reject(new Error("drive.appdata scope not granted"));
             return;
           }
           this.setToken(response.access_token);

@@ -9,7 +9,7 @@ import type {
   PushedMessage,
   PushedMessageFile,
   PushedMessageJson,
-} from '../types/index.ts';
+} from "../types/index.ts";
 import { getLatestMessage } from "./get-latest-message.ts";
 import { getMessageById } from "./get-message-by-id.ts";
 import { listMessages } from "./list-messages.ts";
@@ -24,7 +24,7 @@ export class DriveSocket {
 
   constructor(config: DriveSocketConfig) {
     this.oauth = new GoogleOAuth(config.clientId, {
-      gisScriptUrl: config.gisScriptUrl,
+      googleSignInScriptUrl: config.googleSignInScriptUrl,
       onTokenChange: config.onTokenChange,
     });
     this.client = new DriveClient(() => this.oauth.getAccessToken());

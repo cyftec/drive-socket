@@ -1,4 +1,4 @@
-export type MessageKind = 'json' | 'file';
+export type MessageKind = "json" | "file";
 
 export interface MessageRef {
   fileId: string;
@@ -17,22 +17,24 @@ export interface PushedMessageBase {
 }
 
 export interface PushedMessageJson<T = unknown> extends PushedMessageBase {
-  kind: 'json';
-  mimeType: 'application/json';
+  kind: "json";
+  mimeType: "application/json";
   payload: T;
 }
 
 export interface PushedMessageFile extends PushedMessageBase {
-  kind: 'file';
+  kind: "file";
   mimeType: string;
   payload: Blob;
 }
 
-export type PushedMessage<T = unknown> = PushedMessageJson<T> | PushedMessageFile;
+export type PushedMessage<T = unknown> =
+  | PushedMessageJson<T>
+  | PushedMessageFile;
 
 export interface DriveSocketConfig {
   clientId: string;
-  gisScriptUrl?: string;
+  googleSignInScriptUrl?: string;
   onTokenChange?: (token: string | null) => void;
 }
 
