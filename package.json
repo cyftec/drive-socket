@@ -12,10 +12,12 @@
     "src"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tests.json",
+    "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "bun-types": "latest",
     "typescript": "^5"
   },
   "peerDependencies": {

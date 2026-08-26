@@ -25,6 +25,11 @@ export class DriveSocket {
   private readonly oauth: GoogleOAuth;
   private readonly gDriveClient: GoogleDriveClient;
 
+  constructor(config: DriveSocketConfig) {
+    this.oauth = new GoogleOAuth(config.clientId);
+    this.gDriveClient = new GoogleDriveClient(this.oauth);
+  }
+
   private async collectFileMessageMetadata(
     query: string,
     orderBy?: string,
@@ -52,11 +57,6 @@ export class DriveSocket {
     }
     for (const file of metadata) await this.gDriveClient.deleteFile(file.id);
     return { deleted: metadata, deletedCount: metadata.length, keptCount };
-  }
-
-  constructor(config: DriveSocketConfig) {
-    this.oauth = new GoogleOAuth(config.clientId);
-    this.gDriveClient = new GoogleDriveClient(this.oauth);
   }
 
   connect(): Promise<void> {

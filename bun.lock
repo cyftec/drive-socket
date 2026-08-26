@@ -6,6 +6,7 @@
       "name": "drive-socket",
       "devDependencies": {
         "@types/bun": "latest",
+        "bun-types": "latest",
         "typescript": "^5",
       },
       "peerDependencies": {

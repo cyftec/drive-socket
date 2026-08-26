@@ -1,0 +1,8 @@
+---
+description: Keep tests out of runtime src — mock externally, never mould production code
+alwaysApply: true
+---
+
+# Test Isolation
+
+Tests never live in or modify `src/`. See global `~/.cursor/rules/test-isolation.mdc`.
