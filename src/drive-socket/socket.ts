@@ -1,15 +1,5 @@
-import { GoogleOAuth, GoogleDriveClient } from "../google";
-import { InvalidMimeError } from "../errors/invalid-mime-error.ts";
-import { MessageExistsError } from "../errors/message-exists-error.ts";
-import { generateMessageFileName } from "../messages/filename/generate-message-file-name.ts";
-import { isValidMimeType } from "../messages/mime/is-valid-mime-type.ts";
-import { mimeToExtension } from "../messages/mime/mime-to-extension.ts";
-import { sortByCreatedTimeDesc } from "../messages/parser/sort-by-created-time-desc.ts";
-import {
-  baseMessageQuery,
-  buildBeforeQuery,
-  buildReceiveQuery,
-} from "../messages/query-helpers.ts";
+import { InvalidMimeError, MessageExistsError } from "../errors";
+import { GoogleDriveClient, GoogleOAuth } from "../google";
 import type {
   DriveSocketConfig,
   FileMessage,
@@ -17,7 +7,16 @@ import type {
   PruneOptions,
   PruneResult,
   ReceiveOptions,
-} from "../types/index.ts";
+} from "../types";
+import {
+  baseMessageQuery,
+  buildBeforeQuery,
+  buildReceiveQuery,
+  generateMessageFileName,
+  isValidMimeType,
+  mimeToExtension,
+  sortByCreatedTimeDesc,
+} from "./utils";
 
 export class DriveSocket {
   private readonly oauth: GoogleOAuth;
@@ -75,7 +74,7 @@ export class DriveSocket {
   ): Promise<FileMessage> {
     const { mimeType } = options;
     if (!isValidMimeType(mimeType)) {
-      throw new InvalidMimeError(mimeType, "must match type/subtype format");
+      throw new InvalidMimeError(mimeType, "not supported");
     }
     const fileName = generateMessageFileName(mimeToExtension(mimeType));
     if (await this.gDriveClient.fileExists(fileName)) {

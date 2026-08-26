@@ -1,7 +1,7 @@
 import { NotAuthenticatedError } from "../../errors/not-authenticated-error.ts";
 import type { GoogleOAuth } from "../auth/google-oauth.ts";
 import type { FileMessageMetadata } from "../../types/index.ts";
-import { encodeMultipart } from "../../messages/multipart/encode-multipart.ts";
+import { encodeMultipart } from "./request-body-encoder.ts";
 import { parseDriveError } from "./parse-drive-error.ts";
 import { DRIVE_API, DRIVE_UPLOAD } from "../constants.ts";
 
