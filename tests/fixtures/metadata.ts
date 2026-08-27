@@ -1,8 +1,10 @@
-import type { FileMessageMetadata } from "../../src/types/index.ts";
+import type { FileMetadata } from "../../src/types/index.ts";
+
+type DefaultFileFields = "id" | "name" | "createdTime" | "mimeType" | "size";
 
 export function sampleMetadata(
-  overrides: Partial<FileMessageMetadata> = {},
-): FileMessageMetadata {
+  overrides: Partial<FileMetadata<DefaultFileFields>> = {},
+): FileMetadata<DefaultFileFields> {
   return {
     id: "file-1",
     name: "msg-20260101T000000Z-abcdef12.json",

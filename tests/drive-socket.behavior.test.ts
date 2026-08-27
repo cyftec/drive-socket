@@ -12,11 +12,22 @@ import {
   NotAuthenticatedError,
 } from "../src/errors/index.ts";
 import { DriveSocket } from "../src/index.ts";
-import { DRIVE_APPDATA_SCOPE } from "../src/google/constants.ts";
+import { DRIVE_API, DRIVE_APPDATA_SCOPE } from "../src/google/constants.ts";
 import { clearGoogleOAuthMock, installGoogleOAuthMock } from "./mocks/google.ts";
 import { DriveApiFixture } from "./mocks/drive-api.ts";
 
 const FIXED_FILE_NAME = "msg-20260101T000000Z-abcdefab.json";
+const BASE_QUERY = "name contains 'msg-' and trashed=false";
+
+function listQueryFromUrl(url: string): string | null {
+  return new URL(url).searchParams.get("q");
+}
+
+function listQueries(drive: DriveApiFixture): string[] {
+  return drive.requests
+    .filter(({ url }) => url.startsWith(DRIVE_API) && url.includes("q="))
+    .map(({ url }) => listQueryFromUrl(url) ?? "");
+}
 
 describe("DriveSocket", () => {
   let drive: DriveApiFixture;
@@ -131,6 +142,35 @@ describe("DriveSocket", () => {
         ),
       ).toBe(true);
     });
+
+    it("generates msg-prefixed file names with a timestamp and extension", async () => {
+      spyOn(crypto, "randomUUID").mockRestore();
+      spyOn(Date.prototype, "toISOString").mockRestore();
+
+      const socket = new DriveSocket({ clientId: "client-id" });
+      await socket.connect();
+
+      const message = await socket.push(new Blob(["{}"]), {
+        mimeType: "application/json",
+      });
+
+      expect(message.name).toMatch(/^msg-\d{8}T\d{6}Z-[a-f0-9]{8}\.json$/);
+    });
+
+    it("requests configured metadata fields on upload", async () => {
+      const socket = new DriveSocket({ clientId: "client-id" }, ["md5Checksum"]);
+      await socket.connect();
+
+      await socket.push(new Blob(["{}"]), { mimeType: "application/json" });
+
+      const uploadRequest = drive.requests.find(
+        ({ method, url }) =>
+          method === "POST" && url.includes("uploadType=multipart"),
+      );
+      expect(uploadRequest?.url).toContain(
+        "fields=id,name,createdTime,mimeType,size,md5Checksum",
+      );
+    });
   });
 
   describe("receive", () => {
@@ -194,6 +234,95 @@ describe("DriveSocket", () => {
         drive.requests.filter(({ url }) => url.includes("pageToken=page-2")),
       ).toHaveLength(1);
     });
+
+    it("sorts newest first and breaks ties by id", async () => {
+      const socket = new DriveSocket({ clientId: "client-id" });
+      await socket.connect();
+      drive.addFile({
+        id: "b",
+        createdTime: "2026-01-02T00:00:00.000Z",
+      });
+      drive.addFile({
+        id: "a",
+        createdTime: "2026-01-02T00:00:00.000Z",
+      });
+      drive.addFile({
+        id: "c",
+        createdTime: "2026-01-01T00:00:00.000Z",
+      });
+
+      const metadata = await socket.receive({ as: "file-message-metadata" });
+
+      expect(metadata.map((file) => file.id)).toEqual(["a", "b", "c"]);
+    });
+
+    it("uses the base message query when no time filter is set", async () => {
+      const socket = new DriveSocket({ clientId: "client-id" });
+      await socket.connect();
+      drive.addFile({ id: "listed" });
+
+      await socket.receive({ as: "file-message-metadata" });
+
+      expect(listQueries(drive).some((query) => query === BASE_QUERY)).toBe(
+        true,
+      );
+    });
+
+    it("filters with a since time query", async () => {
+      const socket = new DriveSocket({ clientId: "client-id" });
+      await socket.connect();
+      drive.addFile({
+        id: "old",
+        createdTime: "2026-01-01T00:00:00.000Z",
+      });
+      drive.addFile({
+        id: "new",
+        createdTime: "2026-01-05T00:00:00.000Z",
+      });
+
+      const since = new Date("2026-01-03T00:00:00.000Z");
+      const metadata = await socket.receive({
+        as: "file-message-metadata",
+        timeQuery: { date: since, relation: "since", includingDate: true },
+      });
+
+      expect(metadata.map((file) => file.id)).toEqual(["new"]);
+      expect(
+        listQueries(drive).some(
+          (query) =>
+            query ===
+            `${BASE_QUERY} and createdTime >= '2026-01-03T00:00:00.000Z'`,
+        ),
+      ).toBe(true);
+    });
+
+    it("filters with an until time query", async () => {
+      const socket = new DriveSocket({ clientId: "client-id" });
+      await socket.connect();
+      drive.addFile({
+        id: "old",
+        createdTime: "2026-01-01T00:00:00.000Z",
+      });
+      drive.addFile({
+        id: "new",
+        createdTime: "2026-01-05T00:00:00.000Z",
+      });
+
+      const until = new Date("2026-01-03T00:00:00.000Z");
+      const metadata = await socket.receive({
+        as: "file-message-metadata",
+        timeQuery: { date: until, relation: "until" },
+      });
+
+      expect(metadata.map((file) => file.id)).toEqual(["old"]);
+      expect(
+        listQueries(drive).some(
+          (query) =>
+            query ===
+            `${BASE_QUERY} and createdTime < '2026-01-03T00:00:00.000Z'`,
+        ),
+      ).toBe(true);
+    });
   });
 
   describe("getById", () => {
@@ -207,6 +336,21 @@ describe("DriveSocket", () => {
 
       expect(message.id).toBe("target-id");
       expect(await message.fileBlob.text()).toBe("by-id");
+    });
+
+    it("requests configured metadata fields", async () => {
+      const socket = new DriveSocket({ clientId: "client-id" }, ["md5Checksum"]);
+      await socket.connect();
+      drive.addFile({ id: "target-id" });
+
+      await socket.getById("target-id");
+
+      const metadataRequest = drive.requests.find(
+        ({ url }) => url.includes("/files/target-id") && url.includes("fields="),
+      );
+      expect(metadataRequest?.url).toContain(
+        "fields=id,name,createdTime,mimeType,size,md5Checksum",
+      );
     });
   });
 
@@ -242,6 +386,13 @@ describe("DriveSocket", () => {
 
       expect(result.deleted.map((file) => file.id)).toEqual(["old"]);
       expect(drive.files.has("new")).toBe(true);
+      expect(
+        listQueries(drive).some(
+          (query) =>
+            query ===
+            `${BASE_QUERY} and createdTime < '2026-01-03T00:00:00.000Z'`,
+        ),
+      ).toBe(true);
     });
 
     it("supports dry runs without deleting files", async () => {

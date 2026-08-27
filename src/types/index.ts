@@ -1,14 +1,14 @@
-export interface FileMessageMetadata {
-  id: string;
-  name: string;
-  createdTime: string;
-  mimeType: string;
-  size?: string;
-}
+import type {
+  TimedFileQuery,
+  DriveFileMetadata,
+  FileMetadataField,
+} from "../google";
 
-export interface FileMessage extends FileMessageMetadata {
+export type FileMetadata<F extends FileMetadataField> = DriveFileMetadata<F>;
+
+export type FileMessage<F extends FileMetadataField> = FileMetadata<F> & {
   fileBlob: Blob;
-}
+};
 
 export interface DriveSocketConfig {
   clientId: string;
@@ -18,8 +18,7 @@ export type ReceiveAs = "file-message-metadata" | "file-message";
 
 export interface ReceiveOptions {
   as: ReceiveAs;
-  since?: Date;
-  until?: Date;
+  timeQuery?: TimedFileQuery;
   limit?: number;
 }
 
@@ -27,8 +26,8 @@ export interface PruneOptions {
   dryRun?: boolean;
 }
 
-export interface PruneResult {
-  deleted: FileMessageMetadata[];
+export interface PruneResult<F extends FileMetadataField> {
+  deleted: FileMetadata<F>[];
   deletedCount: number;
   keptCount: number;
 }

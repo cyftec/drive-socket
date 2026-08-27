@@ -1,8 +1,9 @@
 import { DRIVE_API, DRIVE_UPLOAD } from "../../src/google/constants.ts";
-import type { FileMessageMetadata } from "../../src/types/index.ts";
+import type { FileMetadata } from "../../src/types/index.ts";
 import { sampleMetadata } from "../fixtures/metadata.ts";
 
-type StoredFile = FileMessageMetadata & { fileBlob: Blob };
+type DefaultFileFields = "id" | "name" | "createdTime" | "mimeType" | "size";
+type StoredFile = FileMetadata<DefaultFileFields> & { fileBlob: Blob };
 
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -16,7 +17,7 @@ function parseFileIdFromPath(pathname: string): string | null {
   return match?.[1] ?? null;
 }
 
-function matchesDriveQuery(file: FileMessageMetadata, query: string): boolean {
+function matchesDriveQuery(file: FileMetadata<DefaultFileFields>, query: string): boolean {
   if (!file.name.includes("msg-")) return false;
 
   const nameMatch = query.match(/name='((?:\\'|[^'])*)'/);
@@ -25,14 +26,17 @@ function matchesDriveQuery(file: FileMessageMetadata, query: string): boolean {
     if (file.name !== expectedName) return false;
   }
 
-  const sinceMatch = query.match(/createdTime >= '([^']+)'/);
-  if (sinceMatch?.[1] && file.createdTime < sinceMatch[1]) return false;
+  const gteMatch = query.match(/createdTime >= '([^']+)'/);
+  if (gteMatch?.[1] && file.createdTime < gteMatch[1]) return false;
 
-  const untilMatch = query.match(/createdTime <= '([^']+)'/);
-  if (untilMatch?.[1] && file.createdTime > untilMatch[1]) return false;
+  const gtMatch = query.match(/createdTime > '([^']+)'/);
+  if (gtMatch?.[1] && file.createdTime <= gtMatch[1]) return false;
 
-  const beforeMatch = query.match(/createdTime < '([^']+)'/);
-  if (beforeMatch?.[1] && file.createdTime >= beforeMatch[1]) return false;
+  const lteMatch = query.match(/createdTime <= '([^']+)'/);
+  if (lteMatch?.[1] && file.createdTime > lteMatch[1]) return false;
+
+  const ltMatch = query.match(/createdTime < '([^']+)'/);
+  if (ltMatch?.[1] && file.createdTime >= ltMatch[1]) return false;
 
   return true;
 }
@@ -41,10 +45,10 @@ export class DriveApiFixture {
   readonly files = new Map<string, StoredFile>();
   readonly requests: Array<{ method: string; url: string }> = [];
   private nextId = 1;
-  private listPageCache = new Map<string, FileMessageMetadata[]>();
+  private listPageCache = new Map<string, FileMetadata<DefaultFileFields>[]>();
 
   addFile(
-    overrides: Partial<FileMessageMetadata> & { fileBlob?: Blob } = {},
+    overrides: Partial<FileMetadata<DefaultFileFields>> & { fileBlob?: Blob } = {},
   ): StoredFile {
     const id = overrides.id ?? `file-${this.nextId++}`;
     const file: StoredFile = {

@@ -1,0 +1,27 @@
+---
+description: Encapsulation over loose dependencies — minimal API surface, add only when required
+alwaysApply: true
+---
+
+# Encapsulation Over Loose Dependencies
+
+## Principle
+
+- **Encapsulation over loose dependencies** — not "over exportability." Bundling cost is the same whether logic is exported or private; the goal is cohesive ownership, not smaller bundles.
+- **Never expose unless crucially required.** We cannot predict why a caller would want a standalone helper. Ship the smallest public surface; add missing capability in a later update when a real need appears.
+
+## Default
+
+- Put logic on the class that owns it as `private` methods or colocated integration code.
+- Do not scatter standalone exports that create optional dependency paths for callers.
+- Do not add DI, test hooks, or `export-for-tests` surfaces to support mocking.
+
+## When refactoring
+
+- Deleting exported `utils/` helpers and moving logic into classes is preferred.
+- Tests follow the encapsulation boundary: exercise public class APIs with external mocks (`fetch`, `google`, fixtures), not resurrect removed helper imports.
+
+## Shared vs private
+
+- Export only what callers must have at module boundaries (`DriveSocket`, types, boundaries that are genuinely shared).
+- Integration details (`buildQuery`, multipart encoding, sorting, filename generation) stay inside `DriveSocket` or `GoogleDriveClient` until multiple modules truly need them.
