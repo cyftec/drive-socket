@@ -1,19 +1,20 @@
-import { InvalidMimeError, MessageExistsError } from "../errors";
+import {
+  FilenameExtensionMismatchError,
+  InvalidMimeError,
+  MessageExistsError,
+} from "../errors";
 import {
   GoogleDriveClient,
   GoogleOAuth,
   isValidMimeType,
   mimeToExtension,
   type FileMetadataField,
-  type TimedFileQuery,
 } from "../google";
 import type {
   DriveSocketConfig,
   FileMetadata,
   FileMessage,
-  PruneOptions,
-  PruneResult,
-  ReceiveOptions,
+  OnReceiveEvent,
 } from "../types";
 
 type DefaultFileMetadataFields =
@@ -26,11 +27,18 @@ type DefaultFileMetadataFields =
 type SocketMetadataFields<F extends FileMetadataField> =
   DefaultFileMetadataFields | F;
 
+function tokenStorageKey(clientId: string, folderName: string): string {
+  return `drive-socket:tokens:${clientId}:${folderName}`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class DriveSocket<F extends FileMetadataField = never> {
+  private readonly config: DriveSocketConfig<F>;
   private readonly oauth: GoogleOAuth;
   private readonly gDriveClient: GoogleDriveClient;
-  private readonly filenamePrefix = "msg-";
-  private readonly baseQuery: string;
   private readonly metadataFields = new Set<FileMetadataField>([
     "id",
     "name",
@@ -39,24 +47,110 @@ export class DriveSocket<F extends FileMetadataField = never> {
     "size",
   ]);
 
-  constructor(
-    config: DriveSocketConfig,
-    metadataFields?: readonly F[],
-  ) {
-    this.oauth = new GoogleOAuth(config.clientId);
+  private folderId: string | null = null;
+  private pollLoopRunning = false;
+  private onReceiveCallback:
+    | ((event: OnReceiveEvent<SocketMetadataFields<F>>) => void)
+    | null = null;
+  private idlePruneScheduled = false;
+  private downloadAbortController: AbortController | null = null;
+
+  constructor(config: DriveSocketConfig<F>) {
+    if (config.pollIntervalInMs <= 0) {
+      throw new RangeError("pollIntervalInMs must be > 0");
+    }
+    if (config.maxFiles < 0) {
+      throw new RangeError("maxFiles must be >= 0");
+    }
+    if (!config.folderName) {
+      throw new RangeError("folderName must not be empty");
+    }
+
+    this.config = config;
+    this.oauth = new GoogleOAuth(
+      config.clientId,
+      tokenStorageKey(config.clientId, config.folderName),
+    );
+    this.oauth.installPersistListeners();
     this.gDriveClient = new GoogleDriveClient(this.oauth);
-    this.baseQuery = this.gDriveClient.buildQuery(this.filenamePrefix);
-    metadataFields?.forEach((field) => this.metadataFields.add(field));
+    config.metadataFields?.forEach((field) => this.metadataFields.add(field));
+
+    this.connect({ interactive: false }).catch(() => {});
   }
 
-  private getTimedQuery(timeQuery?: TimedFileQuery) {
-    return this.gDriveClient.buildQuery(this.filenamePrefix, false, timeQuery);
+  connect(options?: { interactive?: boolean }): Promise<void> {
+    return this.oauth.connect(options);
+  }
+
+  async disconnect(): Promise<void> {
+    this.pollLoopRunning = false;
+    this.onReceiveCallback = null;
+    if (this.downloadAbortController) {
+      this.downloadAbortController.abort();
+      this.downloadAbortController = null;
+    }
+    await this.oauth.disconnect();
+    this.folderId = null;
+  }
+
+  async push(
+    fileBlob: Blob,
+    options: { mimeType: string; fileName: string },
+  ): Promise<FileMessage<SocketMetadataFields<F>>> {
+    const { mimeType, fileName } = options;
+    if (!isValidMimeType(mimeType)) {
+      throw new InvalidMimeError(mimeType, "not supported");
+    }
+
+    const expectedExtension = mimeToExtension(mimeType);
+    const fileExtension = fileName.split(".").pop()?.toLowerCase();
+    if (fileExtension !== expectedExtension.toLowerCase()) {
+      throw new FilenameExtensionMismatchError(
+        fileName,
+        mimeType,
+        expectedExtension,
+      );
+    }
+
+    const folderId = await this.ensureFolderId();
+    if (await this.gDriveClient.fileExists(fileName, folderId)) {
+      throw new MessageExistsError(fileName);
+    }
+
+    const metadata = await this.gDriveClient.saveNewFile<SocketMetadataFields<F>>(
+      fileName,
+      mimeType,
+      fileBlob,
+      folderId,
+      [...this.metadataFields] as SocketMetadataFields<F>[],
+    );
+    this.scheduleIdlePrune();
+    return { ...metadata, fileBlob };
+  }
+
+  onReceive(
+    callback: (event: OnReceiveEvent<SocketMetadataFields<F>>) => void,
+  ): void {
+    this.onReceiveCallback = callback;
+    if (!this.pollLoopRunning) {
+      this.pollLoopRunning = true;
+      this.runPollLoop();
+    }
+  }
+
+  private async ensureFolderId(): Promise<string> {
+    if (this.folderId) return this.folderId;
+    this.folderId = await this.gDriveClient.ensureAppDataFolder(
+      this.config.folderName,
+    );
+    return this.folderId;
   }
 
   private async collectFileMessageMetadata(
-    query: string,
+    folderId: string,
     orderBy?: string,
   ): Promise<FileMetadata<SocketMetadataFields<F>>[]> {
+    const query = this.gDriveClient.buildFolderQuery(folderId);
     const metadata: FileMetadata<SocketMetadataFields<F>>[] = [];
     const metadataFields = [...this.metadataFields] as SocketMetadataFields<F>[];
     let pageToken: string | undefined;
@@ -75,27 +169,6 @@ export class DriveSocket<F extends FileMetadataField = never> {
     return metadata;
   }
 
-  private async deleteFileMessageMetadata(
-    metadata: FileMetadata<SocketMetadataFields<F>>[],
-    dryRun?: boolean,
-    keptCount = 0,
-  ): Promise<PruneResult<SocketMetadataFields<F>>> {
-    if (dryRun) {
-      return { deleted: metadata, deletedCount: metadata.length, keptCount };
-    }
-    for (const file of metadata) await this.gDriveClient.deleteFile(file.id);
-    return { deleted: metadata, deletedCount: metadata.length, keptCount };
-  }
-
-  private newFileName(extension: string, length = 8): string {
-    const randomSuffix = crypto.randomUUID().replace(/-/g, "").slice(0, length);
-    const timestamp = new Date()
-      .toISOString()
-      .replace(/[-:]/g, "")
-      .replace(/\.\d{3}Z$/, "Z");
-    return `msg-${timestamp}-${randomSuffix}.${extension}`;
-  }
-
   private sortMetadataFilesByCreatedTimeDesc(
     files: FileMetadata<SocketMetadataFields<F>>[],
   ): FileMetadata<SocketMetadataFields<F>>[] {
@@ -105,113 +178,109 @@ export class DriveSocket<F extends FileMetadataField = never> {
     });
   }
 
-  connect(): Promise<void> {
-    return this.oauth.connect();
-  }
+  private async runPollLoop(): Promise<void> {
+    while (this.pollLoopRunning) {
+      const cycleStart = Date.now();
 
-  disconnect(): Promise<void> {
-    return this.oauth.disconnect();
-  }
+      if (!this.oauth.hasValidAccessToken()) {
+        await sleep(this.config.pollIntervalInMs);
+        continue;
+      }
 
-  isAuthenticated(): boolean {
-    return this.oauth.getAccessToken() !== null;
-  }
+      try {
+        const folderId = await this.ensureFolderId();
+        const metadataList = this.sortMetadataFilesByCreatedTimeDesc(
+          await this.collectFileMessageMetadata(folderId, "createdTime desc"),
+        );
 
-  async push(
-    fileBlob: Blob,
-    options: { mimeType: string },
-  ): Promise<FileMessage<SocketMetadataFields<F>>> {
-    const { mimeType } = options;
-    if (!isValidMimeType(mimeType)) {
-      throw new InvalidMimeError(mimeType, "not supported");
+        if (this.onReceiveCallback) {
+          this.onReceiveCallback({ type: "metadata", files: metadataList });
+        }
+        this.scheduleIdlePrune();
+
+        let overrun = false;
+        for (const metadata of metadataList) {
+          if (Date.now() - cycleStart >= this.config.pollIntervalInMs) {
+            overrun = true;
+            break;
+          }
+
+          if (this.downloadAbortController) {
+            this.downloadAbortController.abort();
+          }
+          this.downloadAbortController = new AbortController();
+          const signal = this.downloadAbortController.signal;
+
+          try {
+            const fileBlob = await this.gDriveClient.downloadFile(
+              metadata.id,
+              signal,
+            );
+            if (this.onReceiveCallback) {
+              this.onReceiveCallback({
+                type: "file",
+                message: { ...metadata, fileBlob },
+              });
+            }
+            this.scheduleIdlePrune();
+          } catch (error) {
+            if (signal.aborted) {
+              overrun = true;
+              break;
+            }
+            throw error;
+          }
+
+          if (Date.now() - cycleStart >= this.config.pollIntervalInMs) {
+            overrun = true;
+            break;
+          }
+        }
+
+        this.downloadAbortController = null;
+
+        if (!overrun) {
+          const elapsed = Date.now() - cycleStart;
+          if (elapsed < this.config.pollIntervalInMs) {
+            await sleep(this.config.pollIntervalInMs - elapsed);
+          }
+        }
+      } catch {
+        await sleep(this.config.pollIntervalInMs);
+      }
     }
-    const fileName = this.newFileName(mimeToExtension(mimeType));
-    if (await this.gDriveClient.fileExists(fileName)) {
-      throw new MessageExistsError(fileName);
-    }
-    const metadata = await this.gDriveClient.saveNewFile<SocketMetadataFields<F>>(
-      fileName,
-      mimeType,
-      fileBlob,
-      [...this.metadataFields] as SocketMetadataFields<F>[],
-    );
-    return { ...metadata, fileBlob };
   }
 
-  async receive(
-    options: ReceiveOptions & { as: "file-message-metadata" },
-  ): Promise<FileMetadata<SocketMetadataFields<F>>[]>;
-  async receive(
-    options: ReceiveOptions & { as: "file-message" },
-  ): Promise<FileMessage<SocketMetadataFields<F>>[]>;
-  async receive(
-    options: ReceiveOptions,
-  ): Promise<
-    FileMetadata<SocketMetadataFields<F>>[] | FileMessage<SocketMetadataFields<F>>[]
-  > {
-    const metadataList = this.sortMetadataFilesByCreatedTimeDesc(
-      await this.collectFileMessageMetadata(
-        this.getTimedQuery(options.timeQuery),
-        "createdTime desc",
-      ),
-    );
-    const selectedMetadataList = options.limit
-      ? metadataList.slice(0, options.limit)
-      : metadataList;
+  private scheduleIdlePrune(): void {
+    if (this.idlePruneScheduled) return;
+    this.idlePruneScheduled = true;
 
-    if (options.as === "file-message-metadata") return selectedMetadataList;
-
-    const messages: FileMessage<SocketMetadataFields<F>>[] = [];
-    for (const metadata of selectedMetadataList) {
-      const fileBlob = await this.gDriveClient.downloadFile(metadata.id);
-      messages.push({ ...metadata, fileBlob });
-    }
-    return messages;
-  }
-
-  async getById(fileId: string): Promise<FileMessage<SocketMetadataFields<F>>> {
-    const fields = [...this.metadataFields].join(",");
-    const response = await this.gDriveClient.request(
-      `/files/${fileId}?fields=${fields}`,
-    );
-    const metadata = (await response.json()) as FileMetadata<
-      SocketMetadataFields<F>
-    >;
-    const fileBlob = await this.gDriveClient.downloadFile(fileId);
-    return { ...metadata, fileBlob };
-  }
-
-  async pruneByCount(
-    options: { keep: number } & PruneOptions,
-  ): Promise<PruneResult<SocketMetadataFields<F>>> {
-    if (options.keep < 0) throw new RangeError("keep must be >= 0");
-    const metadata = this.sortMetadataFilesByCreatedTimeDesc(
-      await this.collectFileMessageMetadata(this.baseQuery, "createdTime desc"),
-    );
-    const toDelete = metadata.slice(options.keep);
-    return this.deleteFileMessageMetadata(
-      toDelete,
-      options.dryRun,
-      metadata.length - toDelete.length,
-    );
-  }
-
-  async pruneBefore(
-    options: { before: Date } & PruneOptions,
-  ): Promise<PruneResult<SocketMetadataFields<F>>> {
-    const all = await this.collectFileMessageMetadata(this.baseQuery);
-    const beforeTimeQuery: TimedFileQuery = {
-      date: options.before,
-      includingDate: false,
-      relation: "until",
+    const run = () => {
+      this.idlePruneScheduled = false;
+      this.pruneToMaxFiles().catch(() => {});
     };
-    const toDelete = await this.collectFileMessageMetadata(
-      this.getTimedQuery(beforeTimeQuery),
+
+    const scheduleIdle = globalThis.requestIdleCallback;
+    if (typeof scheduleIdle !== "undefined") {
+      scheduleIdle(run, { timeout: 30_000 });
+    } else {
+      setTimeout(run, 1_000);
+    }
+  }
+
+  private async pruneToMaxFiles(): Promise<void> {
+    if (!this.oauth.hasValidAccessToken()) return;
+
+    const folderId = await this.ensureFolderId();
+    const metadata = this.sortMetadataFilesByCreatedTimeDesc(
+      await this.collectFileMessageMetadata(folderId, "createdTime desc"),
     );
-    return this.deleteFileMessageMetadata(
-      toDelete,
-      options.dryRun,
-      all.length - toDelete.length,
-    );
+
+    if (metadata.length <= this.config.maxFiles) return;
+
+    const toDelete = metadata.slice(this.config.maxFiles);
+    for (const file of toDelete) {
+      await this.gDriveClient.deleteFile(file.id);
+    }
   }
 }

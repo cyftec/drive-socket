@@ -1,27 +1,24 @@
-type TokenClientConfig = {
+type CodeClientConfig = {
   client_id: string;
   scope: string;
-  callback: (response: {
-    access_token?: string;
-    error?: string;
-  }) => void;
+  ux_mode?: string;
+  access_type?: string;
+  prompt?: string;
+  callback: (response: { code?: string; error?: string }) => void;
 };
 
 export function installGoogleOAuthMock(options?: {
-  accessToken?: string;
   grantScope?: boolean;
-  onInit?: (config: TokenClientConfig) => void;
+  onCodeInit?: (config: CodeClientConfig) => void;
 }): void {
-  const accessToken = options?.accessToken ?? "test-access-token";
-
   (globalThis as Record<string, unknown>).google = {
     accounts: {
       oauth2: {
-        initTokenClient: (config: TokenClientConfig) => {
-          options?.onInit?.(config);
+        initCodeClient: (config: CodeClientConfig) => {
+          options?.onCodeInit?.(config);
           return {
-            requestAccessToken: () => {
-              config.callback({ access_token: accessToken });
+            requestCode: () => {
+              config.callback({ code: "test-auth-code" });
             },
           };
         },

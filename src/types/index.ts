@@ -1,5 +1,4 @@
 import type {
-  TimedFileQuery,
   DriveFileMetadata,
   FileMetadataField,
 } from "../google";
@@ -10,24 +9,14 @@ export type FileMessage<F extends FileMetadataField> = FileMetadata<F> & {
   fileBlob: Blob;
 };
 
-export interface DriveSocketConfig {
+export interface DriveSocketConfig<F extends FileMetadataField = never> {
   clientId: string;
+  folderName: string;
+  pollIntervalInMs: number;
+  maxFiles: number;
+  metadataFields?: readonly F[];
 }
 
-export type ReceiveAs = "file-message-metadata" | "file-message";
-
-export interface ReceiveOptions {
-  as: ReceiveAs;
-  timeQuery?: TimedFileQuery;
-  limit?: number;
-}
-
-export interface PruneOptions {
-  dryRun?: boolean;
-}
-
-export interface PruneResult<F extends FileMetadataField> {
-  deleted: FileMetadata<F>[];
-  deletedCount: number;
-  keptCount: number;
-}
+export type OnReceiveEvent<F extends FileMetadataField> =
+  | { type: "metadata"; files: FileMetadata<F>[] }
+  | { type: "file"; message: FileMessage<F> };

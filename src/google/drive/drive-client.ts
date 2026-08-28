@@ -1,11 +1,14 @@
 import { NotAuthenticatedError } from "../../errors/not-authenticated-error.ts";
 import type { GoogleOAuth } from "../auth/google-oauth.ts";
-import { DRIVE_API, DRIVE_UPLOAD } from "../constants.ts";
+import {
+  DRIVE_API,
+  DRIVE_UPLOAD,
+  FOLDER_MIME_TYPE,
+} from "../constants.ts";
 import type {
   DriveFileMetadata,
   FilesDownloadResult,
   FileMetadataField,
-  TimedFileQuery,
 } from "../types.ts";
 import { parseDriveError } from "./parse-drive-error.ts";
 
@@ -27,18 +30,6 @@ export class GoogleDriveClient {
     });
   }
 
-  buildQuery(contains: string, trashed = false, timeQuery?: TimedFileQuery) {
-    const baseQuery = `name contains '${contains}' and trashed=${trashed}`;
-    if (!timeQuery) return baseQuery;
-
-    const exclusiveTimeComparison = timeQuery.relation === "since" ? ">" : "<";
-    const timeComparison =
-      exclusiveTimeComparison + (timeQuery.includingDate ? "=" : "");
-    const dateISO = timeQuery.date.toISOString();
-
-    return `${baseQuery} and createdTime ${timeComparison} '${dateISO}'`;
-  }
-
   async request(
     path: string,
     init?: RequestInit,
@@ -57,15 +48,41 @@ export class GoogleDriveClient {
     return response;
   }
 
+  async ensureAppDataFolder(folderName: string): Promise<string> {
+    const escapedName = folderName.replace(/'/g, "\\'");
+    const query = `name='${escapedName}' and mimeType='${FOLDER_MIME_TYPE}' and trashed=false`;
+    const existing = await this.downloadFiles(query, {
+      metadataFields: ["id"] as ["id"],
+    });
+    const found = existing.files?.[0];
+    if (found) return found.id;
+
+    const response = await this.request(
+      "/files?fields=id",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: folderName,
+          mimeType: FOLDER_MIME_TYPE,
+          parents: ["appDataFolder"],
+        }),
+      },
+    );
+    const created = (await response.json()) as { id: string };
+    return created.id;
+  }
+
   async saveNewFile<F extends FileMetadataField>(
     fileName: string,
     mimeType: string,
     fileBlob: Blob,
+    parentFolderId: string,
     metadataFields = ["id", "name", "createdTime", "mimeType", "size"] as F[],
   ): Promise<DriveFileMetadata<F>> {
     const fileMetadata = {
       name: fileName,
-      parents: ["appDataFolder"],
+      parents: [parentFolderId],
       mimeType,
     };
     const body = this.encodeMultipart(fileMetadata, fileBlob, mimeType);
@@ -100,8 +117,14 @@ export class GoogleDriveClient {
     return await response.json();
   }
 
-  async downloadFile(fileId: string): Promise<Blob> {
-    const response = await this.request(`/files/${fileId}?alt=media`);
+  async downloadFile(fileId: string, signal?: AbortSignal): Promise<Blob> {
+    const token = this.oauth.getAccessToken();
+    if (!token) throw new NotAuthenticatedError();
+    const response = await fetch(`${DRIVE_API}/files/${fileId}?alt=media`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
+    });
+    if (!response.ok) throw await parseDriveError(response);
     return response.blob();
   }
 
@@ -109,10 +132,14 @@ export class GoogleDriveClient {
     await this.request(`/files/${fileId}`, { method: "DELETE" });
   }
 
-  async fileExists(fileName: string): Promise<boolean> {
-    const result = await this.downloadFiles(
-      `name='${fileName.replace(/'/g, "\\'")}'`,
-    );
+  async fileExists(fileName: string, parentFolderId: string): Promise<boolean> {
+    const escapedName = fileName.replace(/'/g, "\\'");
+    const query = `name='${escapedName}' and '${parentFolderId}' in parents and trashed=false`;
+    const result = await this.downloadFiles(query);
     return (result.files?.length ?? 0) > 0;
+  }
+
+  buildFolderQuery(parentFolderId: string): string {
+    return `'${parentFolderId}' in parents and trashed=false`;
   }
 }
