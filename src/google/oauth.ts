@@ -1,6 +1,6 @@
-import { DRIVE_APPDATA_SCOPE } from "../constants.ts";
-import { NotAuthenticatedError } from "../../errors/not-authenticated-error.ts";
-import { loadGoogleSignIn } from "./google-sign-in-loader.ts";
+import { DRIVE_APPDATA_SCOPE } from "./utils";
+import { NotAuthenticatedError } from "../errors/not-authenticated-error.ts";
+import { loadGoogleSignIn } from "./sign-in-loader.ts";
 
 interface StoredTokens {
   accessToken: string;
@@ -56,10 +56,7 @@ export class GoogleOAuth {
     if (!this.hasValidAccessToken()) throw new NotAuthenticatedError();
   }
 
-  async authorizedFetch(
-    url: string,
-    init?: RequestInit,
-  ): Promise<Response> {
+  async authorizedFetch(url: string, init?: RequestInit): Promise<Response> {
     if (!this.hasValidAccessToken()) throw new NotAuthenticatedError();
     return fetch(url, {
       ...init,
@@ -153,8 +150,7 @@ export class GoogleOAuth {
       );
     }
     this.accessToken = response.access_token;
-    this.expiresAt =
-      Date.now() + (response.expires_in ?? 3600) * 1000;
+    this.expiresAt = Date.now() + (response.expires_in ?? 3600) * 1000;
   }
 
   private async ensureTokenClient(): Promise<google.accounts.oauth2.TokenClient> {

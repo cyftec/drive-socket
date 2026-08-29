@@ -2,11 +2,14 @@ import {
   FilenameExtensionMismatchError,
   InvalidMimeError,
   MessageExistsError,
-} from "../errors";
-import { GoogleDriveClient } from "../google/drive/drive-client.ts";
-import { GoogleOAuth } from "../google/auth/google-oauth.ts";
-import { isValidMimeType, mimeToExtension } from "../google/mime-helpers.ts";
-import type { DriveMessage, DriveSocketConfig } from "../types";
+} from "./errors/index.ts";
+import {
+  GoogleDriveClient,
+  GoogleOAuth,
+  mimeToExtension,
+  supportedMimeType,
+} from "./google";
+import type { DriveMessage, DriveSocketConfig } from "./types";
 
 function tokenStorageKey(clientId: string, folderName: string): string {
   return `drive-socket:tokens:${clientId}:${folderName}`;
@@ -67,7 +70,7 @@ export class DriveSocket {
     options: { mimeType: string; fileName: string },
   ): Promise<DriveMessage> {
     const { mimeType, fileName } = options;
-    if (!isValidMimeType(mimeType)) {
+    if (!supportedMimeType(mimeType)) {
       throw new InvalidMimeError(mimeType, "not supported");
     }
 

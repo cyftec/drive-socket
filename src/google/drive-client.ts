@@ -1,10 +1,10 @@
-import { DriveApiError } from "../../errors/drive-api-error.ts";
-import type { GoogleOAuth } from "../auth/google-oauth.ts";
+import { DriveApiError } from "../errors/drive-api-error.ts";
+import type { GoogleOAuth } from "./oauth.ts";
 import {
   DRIVE_API,
   DRIVE_UPLOAD,
   FOLDER_MIME_TYPE,
-} from "../constants.ts";
+} from "./utils/constants.ts";
 
 type ListedDriveFile = {
   id: string;

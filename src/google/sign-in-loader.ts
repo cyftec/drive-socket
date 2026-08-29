@@ -1,4 +1,4 @@
-import { GSI_CLIENT_URL } from "../constants.ts";
+import { GSI_CLIENT_URL } from "./utils";
 
 let loadPromise: Promise<void> | null = null;
 
