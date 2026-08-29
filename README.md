@@ -1,6 +1,6 @@
 # @cyftec/drive-socket
 
-Google Drive `appDataFolder` messaging for static PWAs — push immutable file messages, receive them over a polling socket, and prune old messages automatically. TypeScript source is published as-is (no build step).
+Google Drive `appDataFolder` messaging for static PWAs — push immutable file messages, receive them over a polling socket, and prune old messages on push. TypeScript source is published as-is (no build step).
 
 ## Requirements
 
@@ -67,7 +67,7 @@ Sign-in uses the GIS token model (no backend `client_secret` required). After th
 |--------|-------------|
 | `connect(options?)` | Restore tokens from `localStorage`, silent GIS token renewal, or interactive OAuth sign-in |
 | `disconnect()` | Revoke token, stop polling, clear persisted tokens |
-| `push(fileBlob, { mimeType, fileName })` | Upload immutable message into configured subfolder |
+| `push(fileBlob, { mimeType, fileName })` | Upload immutable message; returns immediately while prune runs in the background |
 | `onReceive(callback)` | Poll on `pollIntervalInMs`; download and emit all folder files each cycle |
 
 ### `onReceive` poll cycle
@@ -88,7 +88,7 @@ If a cycle is still running when `pollIntervalInMs` would elapse, the timer is h
 | `clientId` | Google OAuth Web client ID |
 | `folderName` | Subfolder name inside `appDataFolder` |
 | `pollIntervalInMs` | Poll cycle length in milliseconds |
-| `maxFiles` | Maximum files kept in folder (oldest pruned on browser idle) |
+| `maxFiles` | Maximum files kept in folder (oldest pruned in the background after each `push`) |
 
 ### `DriveMessage`
 

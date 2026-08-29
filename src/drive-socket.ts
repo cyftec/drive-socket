@@ -31,7 +31,6 @@ export class DriveSocket {
   private folderId: string | null = null;
   private pollLoopRunning = false;
   private onReceiveCallback: ((messages: DriveMessage[]) => void) | null = null;
-  private idlePruneScheduled = false;
 
   constructor(config: DriveSocketConfig) {
     if (config.pollIntervalInMs <= 0) {
@@ -95,7 +94,7 @@ export class DriveSocket {
       fileBlob,
       folderId,
     );
-    this.scheduleIdlePrune();
+    this.pruneToMaxFiles().catch(() => {});
     return { ...saved, fileBlob };
   }
 
@@ -156,29 +155,11 @@ export class DriveSocket {
         if (this.onReceiveCallback) {
           this.onReceiveCallback(messages);
         }
-        this.scheduleIdlePrune();
       } catch {
         // wait full interval before retrying
       }
 
       await sleep(this.config.pollIntervalInMs);
-    }
-  }
-
-  private scheduleIdlePrune(): void {
-    if (this.idlePruneScheduled) return;
-    this.idlePruneScheduled = true;
-
-    const run = () => {
-      this.idlePruneScheduled = false;
-      this.pruneToMaxFiles().catch(() => {});
-    };
-
-    const scheduleIdle = globalThis.requestIdleCallback;
-    if (typeof scheduleIdle !== "undefined") {
-      scheduleIdle(run, { timeout: 30_000 });
-    } else {
-      setTimeout(run, 1_000);
     }
   }
 

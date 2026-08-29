@@ -48,11 +48,16 @@ function matchesDriveQuery(file: StoredFile, query: string): boolean {
   return true;
 }
 
+function isFolderContentsListQuery(query: string): boolean {
+  return /'[^']+' in parents and trashed=false$/.test(query);
+}
+
 export class DriveApiFixture {
   readonly files = new Map<string, StoredFile>();
-  readonly requests: Array<{ method: string; url: string }> = [];
+  readonly requests: Array<{ method: string; url: string; at: number }> = [];
   listDelayMs = 0;
   downloadDelayMs = 0;
+  folderContentsListDelayMs = 0;
   private nextId = 1;
 
   addFile(overrides: Partial<StoredFile> = {}): StoredFile {
@@ -93,7 +98,7 @@ export class DriveApiFixture {
       const method =
         init?.method ?? (input instanceof Request ? input.method : "GET");
 
-      this.requests.push({ method, url });
+      this.requests.push({ method, url, at: Date.now() });
 
       if (url.startsWith(DRIVE_UPLOAD) && method === "POST") {
         const id = `file-${this.nextId++}`;
@@ -171,6 +176,12 @@ export class DriveApiFixture {
       const query = parsed.searchParams.get("q");
       if (query) {
         if (this.listDelayMs > 0) await sleep(this.listDelayMs);
+        if (
+          this.folderContentsListDelayMs > 0 &&
+          isFolderContentsListQuery(query)
+        ) {
+          await sleep(this.folderContentsListDelayMs);
+        }
 
         const matched = [...this.files.values()]
           .filter((file) => matchesDriveQuery(file, query))

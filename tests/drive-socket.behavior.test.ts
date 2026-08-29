@@ -87,6 +87,15 @@ describe("DriveSocket", () => {
   let drive: DriveApiFixture;
   let restoreFetch: () => void;
   let localStorageMock: { storage: Map<string, string> };
+  const openSockets: DriveSocket[] = [];
+
+  function createSocket(
+    overrides: Partial<DriveSocketConfig> = {},
+  ): DriveSocket {
+    const socket = new DriveSocket(defaultConfig(overrides));
+    openSockets.push(socket);
+    return socket;
+  }
 
   beforeEach(() => {
     installBrowserGlobals();
@@ -96,7 +105,8 @@ describe("DriveSocket", () => {
     restoreFetch = drive.installFetch();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await Promise.all(openSockets.splice(0).map((socket) => socket.disconnect()));
     restoreFetch();
     clearGoogleOAuthMock();
   });
@@ -131,7 +141,7 @@ describe("DriveSocket", () => {
         }),
       );
 
-      const socket = new DriveSocket(defaultConfig());
+      const socket = createSocket();
       await socket.connect({ interactive: false });
 
       expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(false);
@@ -160,7 +170,7 @@ describe("DriveSocket", () => {
         }),
       );
 
-      const socket = new DriveSocket(defaultConfig());
+      const socket = createSocket();
       await socket.connect({ interactive: false });
 
       expect(silentRequestCount).toBeGreaterThan(0);
@@ -175,7 +185,7 @@ describe("DriveSocket", () => {
         },
       });
 
-      const socket = new DriveSocket(defaultConfig());
+      const socket = createSocket();
       await socket.connect();
 
       expect(capturedScope).toBe(
@@ -184,7 +194,7 @@ describe("DriveSocket", () => {
     });
 
     it("persists tokens to localStorage when visibility becomes hidden", async () => {
-      const socket = new DriveSocket(defaultConfig());
+      const socket = createSocket();
       await socket.connect();
 
       Object.defineProperty(document, "visibilityState", {
@@ -200,7 +210,7 @@ describe("DriveSocket", () => {
     });
 
     it("clears localStorage when tab becomes visible again", async () => {
-      const socket = new DriveSocket(defaultConfig());
+      const socket = createSocket();
       await socket.connect();
 
       Object.defineProperty(document, "visibilityState", {
@@ -226,7 +236,7 @@ describe("DriveSocket", () => {
     });
 
     it("keeps localStorage empty while tab stays visible after connect", async () => {
-      const socket = new DriveSocket(defaultConfig());
+      const socket = createSocket();
       await socket.connect();
 
       expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(false);
@@ -240,7 +250,7 @@ describe("DriveSocket", () => {
     });
 
     it("disconnect revokes and clears persisted tokens", async () => {
-      const socket = new DriveSocket(defaultConfig());
+      const socket = createSocket();
       await socket.connect();
       await socket.disconnect();
 
@@ -250,7 +260,7 @@ describe("DriveSocket", () => {
 
   describe("push", () => {
     it("rejects unsupported mime types", async () => {
-      const socket = new DriveSocket(defaultConfig());
+      const socket = createSocket();
       await socket.connect();
 
       await expect(
@@ -262,7 +272,7 @@ describe("DriveSocket", () => {
     });
 
     it("rejects filename extension mismatch", async () => {
-      const socket = new DriveSocket(defaultConfig());
+      const socket = createSocket();
       await socket.connect();
 
       await expect(
@@ -277,7 +287,7 @@ describe("DriveSocket", () => {
       clearGoogleOAuthMock();
       installGoogleOAuthMock({ silentFails: true });
 
-      const socket = new DriveSocket(defaultConfig({ pollIntervalInMs: 50_000 }));
+      const socket = createSocket({ pollIntervalInMs: 50_000 });
 
       await expect(
         socket.push(new Blob(["{}"]), {
@@ -288,7 +298,7 @@ describe("DriveSocket", () => {
     });
 
     it("uploads into the configured appData subfolder", async () => {
-      const socket = new DriveSocket(defaultConfig());
+      const socket = createSocket();
       await socket.connect();
 
       const folder = drive.addFolder({
@@ -312,7 +322,7 @@ describe("DriveSocket", () => {
     });
 
     it("rejects duplicate file names in folder", async () => {
-      const socket = new DriveSocket(defaultConfig());
+      const socket = createSocket();
       await socket.connect();
 
       const folder = drive.addFolder({
@@ -334,7 +344,7 @@ describe("DriveSocket", () => {
     });
 
     it("returns uploaded message with fileBlob", async () => {
-      const socket = new DriveSocket(defaultConfig());
+      const socket = createSocket();
       await socket.connect();
       drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
 
@@ -352,7 +362,7 @@ describe("DriveSocket", () => {
 
   describe("onReceive", () => {
     it("emits all downloaded files newest-first in one callback", async () => {
-      const socket = new DriveSocket(defaultConfig({ pollIntervalInMs: 200 }));
+      const socket = createSocket({ pollIntervalInMs: 200 });
       await socket.connect();
 
       const folder = drive.addFolder({
@@ -397,7 +407,7 @@ describe("DriveSocket", () => {
         },
       });
 
-      const socket = new DriveSocket(defaultConfig({ pollIntervalInMs: 100 }));
+      const socket = createSocket({ pollIntervalInMs: 100 });
       await socket.connect();
       drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
 
@@ -413,7 +423,7 @@ describe("DriveSocket", () => {
     });
 
     it("stops polling after disconnect", async () => {
-      const socket = new DriveSocket(defaultConfig({ pollIntervalInMs: 50 }));
+      const socket = createSocket({ pollIntervalInMs: 50 });
       await socket.connect();
       drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
 
@@ -432,7 +442,7 @@ describe("DriveSocket", () => {
       const pollIntervalInMs = 80;
       drive.listDelayMs = 120;
 
-      const socket = new DriveSocket(defaultConfig({ pollIntervalInMs }));
+      const socket = createSocket({ pollIntervalInMs });
       await socket.connect();
       drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
 
@@ -452,7 +462,7 @@ describe("DriveSocket", () => {
       const pollIntervalInMs = 80;
       drive.downloadDelayMs = 120;
 
-      const socket = new DriveSocket(defaultConfig({ pollIntervalInMs }));
+      const socket = createSocket({ pollIntervalInMs });
       await socket.connect();
 
       const folder = drive.addFolder({
@@ -478,50 +488,126 @@ describe("DriveSocket", () => {
         drive.downloadDelayMs + pollIntervalInMs - 40,
       );
     });
+
+    it("does not make drive api calls between poll cycles", async () => {
+      const pollIntervalInMs = 500;
+      let receiveCount = 0;
+
+      const socket = createSocket({ pollIntervalInMs });
+      await socket.connect();
+      drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
+
+      socket.onReceive(() => {
+        receiveCount += 1;
+      });
+
+      await new Promise<void>((resolve) => {
+        const interval = setInterval(() => {
+          if (receiveCount >= 1) {
+            clearInterval(interval);
+            resolve();
+          }
+        }, 10);
+      });
+
+      const countAfterFirstCycle = drive.requests.length;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(drive.requests.length).toBe(countAfterFirstCycle);
+
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalInMs));
+      expect(drive.requests.length).toBeGreaterThan(countAfterFirstCycle);
+    });
+    it("does not prune during poll cycles", async () => {
+      const socket = createSocket({ maxFiles: 1, pollIntervalInMs: 200 });
+      await socket.connect();
+
+      const folder = drive.addFolder({
+        id: "folder-1",
+        name: "messages",
+        parentId: "appDataFolder",
+      });
+      drive.addFile({
+        id: "keep",
+        createdTime: "2026-01-05T00:00:00.000Z",
+        parentId: folder.id,
+      });
+      drive.addFile({
+        id: "drop",
+        createdTime: "2026-01-01T00:00:00.000Z",
+        parentId: folder.id,
+      });
+
+      socket.onReceive(() => {});
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      expect(drive.files.has("keep")).toBe(true);
+      expect(drive.files.has("drop")).toBe(true);
+      expect(
+        drive.requests.some(({ method }) => method === "DELETE"),
+      ).toBe(false);
+    });
   });
 
-  describe("idle prune", () => {
-    it("deletes oldest files beyond maxFiles when idle", async () => {
-      const originalIdle = globalThis.requestIdleCallback;
-      globalThis.requestIdleCallback = ((callback: IdleRequestCallback) => {
-        callback({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline);
-        return 1;
-      }) as typeof requestIdleCallback;
+  describe("prune", () => {
+    it("deletes oldest files beyond maxFiles after push", async () => {
+      const socket = createSocket({ maxFiles: 1, pollIntervalInMs: 50_000 });
+      await socket.connect();
 
-      try {
-        const socket = new DriveSocket(
-          defaultConfig({ maxFiles: 1, pollIntervalInMs: 50_000 }),
-        );
-        await socket.connect();
+      const folder = drive.addFolder({
+        id: "folder-1",
+        name: "messages",
+        parentId: "appDataFolder",
+      });
+      drive.addFile({
+        id: "keep",
+        createdTime: "2026-01-05T00:00:00.000Z",
+        parentId: folder.id,
+      });
+      drive.addFile({
+        id: "drop",
+        createdTime: "2026-01-01T00:00:00.000Z",
+        parentId: folder.id,
+      });
 
-        const folder = drive.addFolder({
-          id: "folder-1",
-          name: "messages",
-          parentId: "appDataFolder",
-        });
-        drive.addFile({
-          id: "keep",
-          createdTime: "2026-01-05T00:00:00.000Z",
-          parentId: folder.id,
-        });
-        drive.addFile({
-          id: "drop",
-          createdTime: "2026-01-01T00:00:00.000Z",
-          parentId: folder.id,
-        });
+      await socket.push(new Blob(["{}"]), {
+        mimeType: "application/json",
+        fileName: "trigger.json",
+      });
 
-        await socket.push(new Blob(["{}"]), {
-          mimeType: "application/json",
-          fileName: "trigger.json",
-        });
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
-        await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(drive.files.has("keep")).toBe(true);
+      expect(drive.files.has("drop")).toBe(false);
+    });
 
-        expect(drive.files.has("keep")).toBe(true);
-        expect(drive.files.has("drop")).toBe(false);
-      } finally {
-        globalThis.requestIdleCallback = originalIdle;
-      }
+    it("returns from push before background prune finishes", async () => {
+      drive.folderContentsListDelayMs = 200;
+
+      const socket = createSocket({ maxFiles: 1, pollIntervalInMs: 50_000 });
+      await socket.connect();
+
+      const folder = drive.addFolder({
+        id: "folder-1",
+        name: "messages",
+        parentId: "appDataFolder",
+      });
+      drive.addFile({
+        id: "older",
+        createdTime: "2026-01-01T00:00:00.000Z",
+        parentId: folder.id,
+      });
+
+      await socket.push(new Blob(["{}"]), {
+        mimeType: "application/json",
+        fileName: "newer.json",
+      });
+
+      expect(drive.files.has("older")).toBe(true);
+
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      expect(drive.files.has("older")).toBe(false);
     });
   });
 });
