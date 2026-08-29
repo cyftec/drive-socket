@@ -53,8 +53,9 @@ export class DriveSocket {
     this.connect({ interactive: false }).catch(() => {});
   }
 
-  connect(options?: { interactive?: boolean }): Promise<void> {
-    return this.oauth.connect(options);
+  async connect(options?: { interactive?: boolean }): Promise<void> {
+    await this.oauth.connect(options);
+    await this.ensureFolderId();
   }
 
   async disconnect(): Promise<void> {
@@ -129,18 +130,20 @@ export class DriveSocket {
     const files = this.sortFilesByCreatedTimeDesc(
       await this.gDriveClient.listAllFiles(folderFilesQuery(folderId)),
     );
-    const messages: DriveMessage[] = [];
-
-    for (const file of files) {
-      const fileBlob = await this.gDriveClient.downloadFile(file.id);
-      messages.push({ id: file.id, name: file.name, fileBlob });
-    }
-
-    return messages;
+    return Promise.all(
+      files.map(async (file) => {
+        const fileBlob = await this.gDriveClient.downloadFile(file.id);
+        return { id: file.id, name: file.name, fileBlob };
+      }),
+    );
   }
 
   private async runPollLoop(): Promise<void> {
     while (this.pollLoopRunning) {
+      if (!this.folderId) {
+        throw new Error("Folder ID missing before running the updates poll.");
+      }
+
       try {
         await this.oauth.ensureAccessToken();
       } catch {
@@ -149,8 +152,7 @@ export class DriveSocket {
       }
 
       try {
-        const folderId = await this.ensureFolderId();
-        const messages = await this.downloadFolderMessages(folderId);
+        const messages = await this.downloadFolderMessages(this.folderId);
 
         if (this.onReceiveCallback) {
           this.onReceiveCallback(messages);

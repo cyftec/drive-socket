@@ -97,6 +97,14 @@ describe("DriveSocket", () => {
     return socket;
   }
 
+  function addMessagesFolder() {
+    return drive.addFolder({
+      id: "folder-1",
+      name: "messages",
+      parentId: "appDataFolder",
+    });
+  }
+
   beforeEach(() => {
     installBrowserGlobals();
     drive = new DriveApiFixture();
@@ -298,14 +306,9 @@ describe("DriveSocket", () => {
     });
 
     it("uploads into the configured appData subfolder", async () => {
+      const folder = addMessagesFolder();
       const socket = createSocket();
       await socket.connect();
-
-      const folder = drive.addFolder({
-        id: "folder-1",
-        name: "messages",
-        parentId: "appDataFolder",
-      });
 
       await socket.push(new Blob(['{"hello":"world"}']), {
         mimeType: "application/json",
@@ -322,18 +325,13 @@ describe("DriveSocket", () => {
     });
 
     it("rejects duplicate file names in folder", async () => {
-      const socket = createSocket();
-      await socket.connect();
-
-      const folder = drive.addFolder({
-        id: "folder-1",
-        name: "messages",
-        parentId: "appDataFolder",
-      });
+      const folder = addMessagesFolder();
       drive.addFile({
         name: "dup.json",
         parentId: folder.id,
       });
+      const socket = createSocket();
+      await socket.connect();
 
       await expect(
         socket.push(new Blob(["{}"]), {
@@ -362,14 +360,7 @@ describe("DriveSocket", () => {
 
   describe("onReceive", () => {
     it("emits all downloaded files newest-first in one callback", async () => {
-      const socket = createSocket({ pollIntervalInMs: 200 });
-      await socket.connect();
-
-      const folder = drive.addFolder({
-        id: "folder-1",
-        name: "messages",
-        parentId: "appDataFolder",
-      });
+      const folder = addMessagesFolder();
       drive.addFile({
         id: "older",
         name: "older.json",
@@ -384,6 +375,9 @@ describe("DriveSocket", () => {
         parentId: folder.id,
         fileBlob: new Blob(["newer"]),
       });
+
+      const socket = createSocket({ pollIntervalInMs: 200 });
+      await socket.connect();
 
       const batches: DriveMessage[][] = [];
       socket.onReceive((messages) => batches.push(messages));
@@ -462,20 +456,16 @@ describe("DriveSocket", () => {
       const pollIntervalInMs = 80;
       drive.downloadDelayMs = 120;
 
-      const socket = createSocket({ pollIntervalInMs });
-      await socket.connect();
-
-      const folder = drive.addFolder({
-        id: "folder-1",
-        name: "messages",
-        parentId: "appDataFolder",
-      });
+      const folder = addMessagesFolder();
       drive.addFile({
         id: "file-1",
         name: "slow.json",
         parentId: folder.id,
         fileBlob: new Blob(["slow"]),
       });
+
+      const socket = createSocket({ pollIntervalInMs });
+      await socket.connect();
 
       const callbackTimes: number[] = [];
       socket.onReceive(() => callbackTimes.push(Date.now()));
@@ -551,14 +541,7 @@ describe("DriveSocket", () => {
 
   describe("prune", () => {
     it("deletes oldest files beyond maxFiles after push", async () => {
-      const socket = createSocket({ maxFiles: 1, pollIntervalInMs: 50_000 });
-      await socket.connect();
-
-      const folder = drive.addFolder({
-        id: "folder-1",
-        name: "messages",
-        parentId: "appDataFolder",
-      });
+      const folder = addMessagesFolder();
       drive.addFile({
         id: "keep",
         createdTime: "2026-01-05T00:00:00.000Z",
@@ -569,6 +552,9 @@ describe("DriveSocket", () => {
         createdTime: "2026-01-01T00:00:00.000Z",
         parentId: folder.id,
       });
+
+      const socket = createSocket({ maxFiles: 1, pollIntervalInMs: 50_000 });
+      await socket.connect();
 
       await socket.push(new Blob(["{}"]), {
         mimeType: "application/json",
@@ -584,19 +570,15 @@ describe("DriveSocket", () => {
     it("returns from push before background prune finishes", async () => {
       drive.folderContentsListDelayMs = 200;
 
-      const socket = createSocket({ maxFiles: 1, pollIntervalInMs: 50_000 });
-      await socket.connect();
-
-      const folder = drive.addFolder({
-        id: "folder-1",
-        name: "messages",
-        parentId: "appDataFolder",
-      });
+      const folder = addMessagesFolder();
       drive.addFile({
         id: "older",
         createdTime: "2026-01-01T00:00:00.000Z",
         parentId: folder.id,
       });
+
+      const socket = createSocket({ maxFiles: 1, pollIntervalInMs: 50_000 });
+      await socket.connect();
 
       await socket.push(new Blob(["{}"]), {
         mimeType: "application/json",
