@@ -182,7 +182,9 @@ export class DriveSocket<F extends FileMetadataField = never> {
     while (this.pollLoopRunning) {
       const cycleStart = Date.now();
 
-      if (!this.oauth.hasValidAccessToken()) {
+      try {
+        await this.oauth.ensureAccessToken();
+      } catch {
         await sleep(this.config.pollIntervalInMs);
         continue;
       }
@@ -269,7 +271,11 @@ export class DriveSocket<F extends FileMetadataField = never> {
   }
 
   private async pruneToMaxFiles(): Promise<void> {
-    if (!this.oauth.hasValidAccessToken()) return;
+    try {
+      await this.oauth.ensureAccessToken();
+    } catch {
+      return;
+    }
 
     const folderId = await this.ensureFolderId();
     const metadata = this.sortMetadataFilesByCreatedTimeDesc(

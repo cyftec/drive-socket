@@ -13,11 +13,7 @@ import {
 } from "../src/errors/index.ts";
 import { DriveSocket } from "../src/index.ts";
 import type { DriveSocketConfig, OnReceiveEvent } from "../src/types/index.ts";
-import {
-  DRIVE_APPDATA_SCOPE,
-  FOLDER_MIME_TYPE,
-  GOOGLE_TOKEN_URL,
-} from "../src/google/constants.ts";
+import { DRIVE_APPDATA_SCOPE, FOLDER_MIME_TYPE } from "../src/google/constants.ts";
 import { clearGoogleOAuthMock, installGoogleOAuthMock } from "./mocks/google.ts";
 import { DriveApiFixture } from "./mocks/drive-api.ts";
 
@@ -136,7 +132,6 @@ describe("DriveSocket", () => {
         TOKEN_KEY,
         JSON.stringify({
           accessToken: "stored-access",
-          refreshToken: "stored-refresh",
           expiresAt: Date.now() + 3600_000,
         }),
       );
@@ -153,12 +148,19 @@ describe("DriveSocket", () => {
       ).resolves.toBeDefined();
     });
 
-    it("silently refreshes expired tokens on connect", async () => {
+    it("silently renews expired tokens on connect via GIS", async () => {
+      let silentRequestCount = 0;
+      clearGoogleOAuthMock();
+      installGoogleOAuthMock({
+        onTokenRequest: (config) => {
+          if (config?.prompt === "") silentRequestCount += 1;
+        },
+      });
+
       localStorageMock.storage.set(
         TOKEN_KEY,
         JSON.stringify({
           accessToken: "expired-access",
-          refreshToken: "stored-refresh",
           expiresAt: Date.now() - 1000,
         }),
       );
@@ -166,19 +168,14 @@ describe("DriveSocket", () => {
       const socket = new DriveSocket(defaultConfig());
       await socket.connect({ interactive: false });
 
-      expect(
-        drive.requests.some(
-          ({ url, method }) =>
-            url === GOOGLE_TOKEN_URL && method === "POST",
-        ),
-      ).toBe(true);
+      expect(silentRequestCount).toBeGreaterThan(0);
     });
 
-    it("interactive connect uses code client with drive.appdata scope", async () => {
+    it("interactive connect uses token client with drive.appdata scope", async () => {
       let capturedScope = "";
       clearGoogleOAuthMock();
       installGoogleOAuthMock({
-        onCodeInit: (config) => {
+        onTokenInit: (config) => {
           capturedScope = config.scope;
         },
       });
@@ -187,12 +184,6 @@ describe("DriveSocket", () => {
       await socket.connect();
 
       expect(capturedScope).toBe(DRIVE_APPDATA_SCOPE);
-      expect(
-        drive.requests.some(
-          ({ url, method }) =>
-            url === GOOGLE_TOKEN_URL && method === "POST",
-        ),
-      ).toBe(true);
     });
 
     it("persists tokens to localStorage when visibility becomes hidden", async () => {
@@ -246,6 +237,9 @@ describe("DriveSocket", () => {
     });
 
     it("rejects when not authenticated", async () => {
+      clearGoogleOAuthMock();
+      installGoogleOAuthMock({ silentFails: true });
+
       const socket = new DriveSocket(defaultConfig({ pollIntervalInMs: 50_000 }));
 
       await expect(
@@ -365,6 +359,31 @@ describe("DriveSocket", () => {
       expect(fileEvents.length).toBeGreaterThanOrEqual(2);
       const firstFile = fileEvents[0];
       expect(firstFile?.type === "file" && firstFile.message.id).toBe("newer");
+    });
+
+    it("renews expired tokens during polling without user interaction", async () => {
+      let silentRequestCount = 0;
+      clearGoogleOAuthMock();
+      installGoogleOAuthMock({
+        expiresIn: 61,
+        onTokenRequest: (config) => {
+          if (config?.prompt === "") silentRequestCount += 1;
+        },
+      });
+
+      const socket = new DriveSocket(defaultConfig({ pollIntervalInMs: 100 }));
+      await socket.connect();
+      drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
+
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+      const events: OnReceiveEvent<"id" | "name" | "createdTime" | "mimeType" | "size">[] = [];
+      socket.onReceive((event) => events.push(event));
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      expect(silentRequestCount).toBeGreaterThan(0);
+      expect(events.some((event) => event.type === "metadata")).toBe(true);
     });
 
     it("stops polling after disconnect", async () => {

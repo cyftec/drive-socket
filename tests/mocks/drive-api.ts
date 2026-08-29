@@ -2,7 +2,6 @@ import {
   DRIVE_API,
   DRIVE_UPLOAD,
   FOLDER_MIME_TYPE,
-  GOOGLE_TOKEN_URL,
 } from "../../src/google/constants.ts";
 import type { FileMetadata } from "../../src/types/index.ts";
 import { sampleMetadata } from "../fixtures/metadata.ts";
@@ -62,8 +61,6 @@ function matchesDriveQuery(file: StoredFile, query: string): boolean {
 export class DriveApiFixture {
   readonly files = new Map<string, StoredFile>();
   readonly requests: Array<{ method: string; url: string }> = [];
-  accessToken = "test-access-token";
-  refreshToken = "test-refresh-token";
   private nextId = 1;
   private listPageCache = new Map<string, FileMetadata<DefaultFileFields>[]>();
 
@@ -113,29 +110,6 @@ export class DriveApiFixture {
         init?.method ?? (input instanceof Request ? input.method : "GET");
 
       this.requests.push({ method, url });
-
-      if (url === GOOGLE_TOKEN_URL && method === "POST") {
-        const body =
-          init?.body instanceof URLSearchParams
-            ? init.body
-            : new URLSearchParams(String(init?.body ?? ""));
-        const grantType = body.get("grant_type");
-
-        if (grantType === "refresh_token") {
-          return jsonResponse({
-            access_token: this.accessToken,
-            expires_in: 3600,
-          });
-        }
-
-        if (grantType === "authorization_code") {
-          return jsonResponse({
-            access_token: this.accessToken,
-            refresh_token: this.refreshToken,
-            expires_in: 3600,
-          });
-        }
-      }
 
       if (url.startsWith(DRIVE_UPLOAD) && method === "POST") {
         const id = `file-${this.nextId++}`;

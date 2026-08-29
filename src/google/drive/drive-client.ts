@@ -35,6 +35,7 @@ export class GoogleDriveClient {
     init?: RequestInit,
     base = DRIVE_API,
   ): Promise<Response> {
+    await this.oauth.ensureAccessToken();
     const token = this.oauth.getAccessToken();
     if (!token) throw new NotAuthenticatedError();
     const response = await fetch(`${base}${path}`, {
@@ -118,6 +119,7 @@ export class GoogleDriveClient {
   }
 
   async downloadFile(fileId: string, signal?: AbortSignal): Promise<Blob> {
+    await this.oauth.ensureAccessToken();
     const token = this.oauth.getAccessToken();
     if (!token) throw new NotAuthenticatedError();
     const response = await fetch(`${DRIVE_API}/files/${fileId}?alt=media`, {

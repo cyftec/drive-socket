@@ -59,13 +59,15 @@ socket.onReceive(async (event) => {
 await socket.disconnect();
 ```
 
-On page load, `DriveSocket` silently restores tokens from `localStorage` (if present) and refreshes them when needed. Tokens are written back to `localStorage` when the tab is hidden or closed — no manual token handling required.
+On page load, `DriveSocket` silently restores tokens from `localStorage` (if present) and renews them through Google Identity Services when they expire. Tokens are written back to `localStorage` when the tab is hidden or closed — no manual token handling required.
+
+Sign-in uses the GIS token model (no backend `client_secret` required). After the user approves access once, the library silently requests new access tokens for hours-long sessions.
 
 ## API
 
 | Method | Description |
 |--------|-------------|
-| `connect(options?)` | Restore tokens from `localStorage`, silent refresh, or interactive OAuth sign-in |
+| `connect(options?)` | Restore tokens from `localStorage`, silent GIS token renewal, or interactive OAuth sign-in |
 | `disconnect()` | Revoke token, stop polling, clear persisted tokens |
 | `push(fileBlob, { mimeType, fileName })` | Upload immutable message into configured subfolder |
 | `onReceive(callback)` | Poll on `pollIntervalInMs`; emit metadata then stream file messages newest-first |

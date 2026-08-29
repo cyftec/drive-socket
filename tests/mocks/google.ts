@@ -1,24 +1,40 @@
-type CodeClientConfig = {
+type TokenClientConfig = {
   client_id: string;
   scope: string;
-  ux_mode?: string;
-  access_type?: string;
+  callback: (response: {
+    access_token?: string;
+    expires_in?: number;
+    error?: string;
+  }) => void;
+};
+
+type TokenRequestConfig = {
   prompt?: string;
-  callback: (response: { code?: string; error?: string }) => void;
 };
 
 export function installGoogleOAuthMock(options?: {
   grantScope?: boolean;
-  onCodeInit?: (config: CodeClientConfig) => void;
+  onTokenInit?: (config: TokenClientConfig) => void;
+  onTokenRequest?: (config?: TokenRequestConfig) => void;
+  silentFails?: boolean;
+  expiresIn?: number;
 }): void {
   (globalThis as Record<string, unknown>).google = {
     accounts: {
       oauth2: {
-        initCodeClient: (config: CodeClientConfig) => {
-          options?.onCodeInit?.(config);
+        initTokenClient: (config: TokenClientConfig) => {
+          options?.onTokenInit?.(config);
           return {
-            requestCode: () => {
-              config.callback({ code: "test-auth-code" });
+            requestAccessToken: (overrideConfig?: TokenRequestConfig) => {
+              options?.onTokenRequest?.(overrideConfig);
+              if (!overrideConfig?.prompt && options?.silentFails) {
+                config.callback({ error: "interaction_required" });
+                return;
+              }
+              config.callback({
+                access_token: "test-access-token",
+                expires_in: options?.expiresIn ?? 3600,
+              });
             },
           };
         },
