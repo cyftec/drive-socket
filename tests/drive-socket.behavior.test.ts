@@ -359,6 +359,116 @@ describe("DriveSocket", () => {
   });
 
   describe("onReceive", () => {
+    it("is not running until start is called", () => {
+      const socket = createSocket();
+      expect(socket.isRunning).toBe(false);
+    });
+
+    it("rejects start before connect", () => {
+      const socket = createSocket();
+      socket.onReceive(() => {});
+      expect(() => socket.start()).toThrow(
+        "Not connected. Call connect() first.",
+      );
+    });
+
+    it("rejects start without onReceive", async () => {
+      addMessagesFolder();
+      const socket = createSocket();
+      await socket.connect();
+      expect(() => socket.start()).toThrow(
+        "No receive callback registered. Call onReceive() first.",
+      );
+    });
+
+    it("rejects start after disconnect", async () => {
+      addMessagesFolder();
+      const socket = createSocket();
+      await socket.connect();
+      socket.onReceive(() => {});
+      await socket.disconnect();
+      expect(() => socket.start()).toThrow(
+        "Not connected. Call connect() first.",
+      );
+    });
+
+    it("does not poll until connected and start is called", async () => {
+      addMessagesFolder();
+      const socket = createSocket({ pollIntervalInMs: 200 });
+      const batches: DriveMessage[][] = [];
+      socket.onReceive((messages) => batches.push(messages));
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(batches).toHaveLength(0);
+
+      await socket.connect();
+      socket.start();
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(batches.length).toBeGreaterThan(0);
+      expect(socket.isRunning).toBe(true);
+    });
+
+    it("pause stops further poll cycles", async () => {
+      addMessagesFolder();
+      const socket = createSocket({ pollIntervalInMs: 50 });
+      await socket.connect();
+
+      const batches: DriveMessage[][] = [];
+      socket.onReceive((messages) => batches.push(messages));
+      socket.start();
+
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const countBeforePause = batches.length;
+      expect(countBeforePause).toBeGreaterThan(0);
+
+      socket.pause();
+      expect(socket.isRunning).toBe(false);
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(batches.length).toBe(countBeforePause);
+    });
+
+    it("start resumes polling after pause", async () => {
+      addMessagesFolder();
+      const socket = createSocket({ pollIntervalInMs: 50 });
+      await socket.connect();
+
+      const batches: DriveMessage[][] = [];
+      socket.onReceive((messages) => batches.push(messages));
+      socket.start();
+
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      socket.pause();
+      const countWhilePaused = batches.length;
+
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      expect(batches.length).toBe(countWhilePaused);
+
+      socket.start();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      expect(batches.length).toBeGreaterThan(countWhilePaused);
+    });
+
+    it("does not spawn duplicate poll loops on repeated start", async () => {
+      addMessagesFolder();
+      const socket = createSocket({ pollIntervalInMs: 200 });
+      await socket.connect();
+      socket.onReceive(() => {});
+
+      const requestCountBefore = drive.requests.length;
+      socket.start();
+      socket.start();
+      socket.start();
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      const pollListRequests = drive.requests
+        .slice(requestCountBefore)
+        .filter(({ method, url }) => method === "GET" && url.includes("/files?"));
+      expect(pollListRequests.length).toBeLessThanOrEqual(2);
+    });
+
     it("emits all downloaded files newest-first in one callback", async () => {
       const folder = addMessagesFolder();
       drive.addFile({
@@ -381,6 +491,7 @@ describe("DriveSocket", () => {
 
       const batches: DriveMessage[][] = [];
       socket.onReceive((messages) => batches.push(messages));
+      socket.start();
 
       await new Promise((resolve) => setTimeout(resolve, 350));
 
@@ -414,6 +525,7 @@ describe("DriveSocket", () => {
 
       const batches: DriveMessage[][] = [];
       socket.onReceive((messages) => batches.push(messages));
+      socket.start();
 
       await new Promise((resolve) => setTimeout(resolve, 350));
 
@@ -446,6 +558,7 @@ describe("DriveSocket", () => {
 
       const batches: DriveMessage[][] = [];
       socket.onReceive((messages) => batches.push(messages));
+      socket.start();
 
       await new Promise((resolve) => setTimeout(resolve, 250));
 
@@ -460,6 +573,7 @@ describe("DriveSocket", () => {
 
       const batches: DriveMessage[][] = [];
       socket.onReceive((messages) => batches.push(messages));
+      socket.start();
 
       await new Promise((resolve) => setTimeout(resolve, 80));
       const countBeforeDisconnect = batches.length;
@@ -479,6 +593,7 @@ describe("DriveSocket", () => {
 
       const callbackTimes: number[] = [];
       socket.onReceive(() => callbackTimes.push(Date.now()));
+      socket.start();
 
       await new Promise((resolve) => setTimeout(resolve, 700));
 
@@ -506,6 +621,7 @@ describe("DriveSocket", () => {
 
       const callbackTimes: number[] = [];
       socket.onReceive(() => callbackTimes.push(Date.now()));
+      socket.start();
 
       await new Promise((resolve) => setTimeout(resolve, 700));
 
@@ -527,6 +643,7 @@ describe("DriveSocket", () => {
       socket.onReceive(() => {
         receiveCount += 1;
       });
+      socket.start();
 
       await new Promise<void>((resolve) => {
         const interval = setInterval(() => {
@@ -565,6 +682,7 @@ describe("DriveSocket", () => {
       });
 
       socket.onReceive(() => {});
+      socket.start();
 
       await new Promise((resolve) => setTimeout(resolve, 250));
 

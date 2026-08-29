@@ -30,6 +30,7 @@ export class DriveSocket {
 
   private folderId: string | null = null;
   private pollLoopRunning = false;
+  private pollLoopTask: Promise<void> | null = null;
   private onReceiveCallback: ((messages: DriveMessage[]) => void) | null = null;
 
   constructor(config: DriveSocketConfig) {
@@ -63,6 +64,30 @@ export class DriveSocket {
     this.onReceiveCallback = null;
     await this.oauth.disconnect();
     this.folderId = null;
+  }
+
+  get isRunning(): boolean {
+    return this.pollLoopRunning;
+  }
+
+  pause(): void {
+    this.pollLoopRunning = false;
+  }
+
+  start(): void {
+    if (!this.folderId) {
+      throw new Error("Not connected. Call connect() first.");
+    }
+    if (!this.onReceiveCallback) {
+      throw new Error("No receive callback registered. Call onReceive() first.");
+    }
+
+    this.pollLoopRunning = true;
+    if (!this.pollLoopTask) {
+      this.pollLoopTask = this.runPollLoop().finally(() => {
+        this.pollLoopTask = null;
+      });
+    }
   }
 
   async push(
@@ -101,10 +126,6 @@ export class DriveSocket {
 
   onReceive(callback: (messages: DriveMessage[]) => void): void {
     this.onReceiveCallback = callback;
-    if (!this.pollLoopRunning) {
-      this.pollLoopRunning = true;
-      this.runPollLoop();
-    }
   }
 
   private async ensureFolderId(): Promise<string> {
@@ -149,9 +170,7 @@ export class DriveSocket {
 
   private async runPollLoop(): Promise<void> {
     while (this.pollLoopRunning) {
-      if (!this.folderId) {
-        throw new Error("Folder ID missing before running the updates poll.");
-      }
+      if (!this.folderId || !this.onReceiveCallback) break;
 
       try {
         await this.oauth.ensureAccessToken();
