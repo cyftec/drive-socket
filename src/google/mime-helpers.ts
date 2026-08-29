@@ -125,10 +125,6 @@ export const MIME_TO_EXTENSION = {
 
 export type SupportedMimeType = keyof typeof MIME_TO_EXTENSION;
 
-export const SUPPORTED_MIME_TYPES = Object.keys(
-  MIME_TO_EXTENSION,
-) as SupportedMimeType[];
-
 export function isValidMimeType(
   mimeType: string,
 ): mimeType is keyof typeof MIME_TO_EXTENSION {

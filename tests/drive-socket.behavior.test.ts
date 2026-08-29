@@ -13,7 +13,6 @@ import {
 } from "../src/errors/index.ts";
 import { DriveSocket } from "../src/index.ts";
 import type { DriveMessage, DriveSocketConfig } from "../src/types/index.ts";
-import { DRIVE_APPDATA_SCOPE } from "../src/google/constants.ts";
 import { clearGoogleOAuthMock, installGoogleOAuthMock } from "./mocks/google.ts";
 import { DriveApiFixture } from "./mocks/drive-api.ts";
 
@@ -179,7 +178,9 @@ describe("DriveSocket", () => {
       const socket = new DriveSocket(defaultConfig());
       await socket.connect();
 
-      expect(capturedScope).toBe(DRIVE_APPDATA_SCOPE);
+      expect(capturedScope).toBe(
+        "https://www.googleapis.com/auth/drive.appdata",
+      );
     });
 
     it("persists tokens to localStorage when visibility becomes hidden", async () => {

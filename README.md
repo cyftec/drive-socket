@@ -98,7 +98,7 @@ Each cycle lasts `pollIntervalInMs`:
 
 ## MIME types
 
-Only Google-supported MIME types in the package allowlist are accepted on `push`. The filename extension must match the MIME type. HTML, CSS, and JavaScript MIME types are excluded. See exported `MIME_TO_EXTENSION`, `SUPPORTED_MIME_TYPES`, and `SupportedMimeType`.
+Only Google-supported MIME types in the package allowlist are accepted on `push`. The filename extension must match the MIME type. HTML, CSS, and JavaScript MIME types are excluded. See exported `MIME_TO_EXTENSION` and `SupportedMimeType`.
 
 ## License
 

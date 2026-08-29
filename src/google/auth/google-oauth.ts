@@ -1,17 +1,10 @@
 import { DRIVE_APPDATA_SCOPE } from "../constants.ts";
 import { NotAuthenticatedError } from "../../errors/not-authenticated-error.ts";
-import { GoogleSignInLoader } from "./gogle-sign-in-loader.ts";
+import { loadGoogleSignIn } from "./google-sign-in-loader.ts";
 
 interface StoredTokens {
   accessToken: string;
-  expiresAt?: number;
-}
-
-interface TokenResponse {
-  access_token?: string;
-  expires_in?: number;
-  error?: string;
-  error_description?: string;
+  expiresAt: number;
 }
 
 const TOKEN_EXPIRY_SKEW_MS = 60_000;
@@ -19,7 +12,6 @@ const TOKEN_EXPIRY_SKEW_MS = 60_000;
 export class GoogleOAuth {
   private accessToken: string | null = null;
   private expiresAt: number | null = null;
-  private persistListenersInstalled = false;
   private tokenClient: google.accounts.oauth2.TokenClient | null = null;
   private tokenRequest: {
     resolve: () => void;
@@ -30,16 +22,20 @@ export class GoogleOAuth {
   constructor(
     private readonly clientId: string,
     private readonly storageKey: string,
-  ) {}
-
-  private hasValidAccessToken(): boolean {
-    if (!this.accessToken) return false;
-    if (this.expiresAt === null) return true;
-    return this.expiresAt > Date.now() + TOKEN_EXPIRY_SKEW_MS;
+  ) {
+    if (typeof window !== "undefined" && typeof document !== "undefined") {
+      const persist = () => this.persistToLocalStorage();
+      window.addEventListener("pagehide", persist);
+      window.addEventListener("beforeunload", persist);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") persist();
+      });
+    }
   }
 
-  getAccessToken(): string | null {
-    return this.hasValidAccessToken() ? this.accessToken : null;
+  private hasValidAccessToken(): boolean {
+    if (!this.accessToken || this.expiresAt === null) return false;
+    return this.expiresAt > Date.now() + TOKEN_EXPIRY_SKEW_MS;
   }
 
   async ensureAccessToken(options?: { interactive?: boolean }): Promise<void> {
@@ -60,18 +56,17 @@ export class GoogleOAuth {
     if (!this.hasValidAccessToken()) throw new NotAuthenticatedError();
   }
 
-  installPersistListeners(): void {
-    if (this.persistListenersInstalled) return;
-    if (typeof window === "undefined" || typeof document === "undefined")
-      return;
-    this.persistListenersInstalled = true;
-
-    const persist = () => this.persistToLocalStorage();
-
-    window.addEventListener("pagehide", persist);
-    window.addEventListener("beforeunload", persist);
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") persist();
+  async authorizedFetch(
+    url: string,
+    init?: RequestInit,
+  ): Promise<Response> {
+    if (!this.hasValidAccessToken()) throw new NotAuthenticatedError();
+    return fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${this.accessToken}`,
+        ...init?.headers,
+      },
     });
   }
 
@@ -96,7 +91,7 @@ export class GoogleOAuth {
   async disconnect(): Promise<void> {
     const token = this.accessToken;
     if (token) {
-      await GoogleSignInLoader.load();
+      await loadGoogleSignIn();
       await new Promise<void>((resolve) => {
         google.accounts.oauth2.revoke(token, () => resolve());
       });
@@ -114,8 +109,10 @@ export class GoogleOAuth {
 
     try {
       const parsed = JSON.parse(raw) as StoredTokens;
-      if (parsed.accessToken) this.accessToken = parsed.accessToken;
-      if (parsed.expiresAt !== undefined) this.expiresAt = parsed.expiresAt;
+      if (parsed.accessToken && parsed.expiresAt !== undefined) {
+        this.accessToken = parsed.accessToken;
+        this.expiresAt = parsed.expiresAt;
+      }
     } catch {
       // ignore corrupt storage
     }
@@ -123,14 +120,14 @@ export class GoogleOAuth {
 
   private persistToLocalStorage(): void {
     if (typeof localStorage === "undefined") return;
-    if (!this.accessToken) {
+    if (!this.accessToken || this.expiresAt === null) {
       this.removeFromLocalStorage();
       return;
     }
 
     const payload: StoredTokens = {
       accessToken: this.accessToken,
-      expiresAt: this.expiresAt ?? undefined,
+      expiresAt: this.expiresAt,
     };
     localStorage.setItem(this.storageKey, JSON.stringify(payload));
   }
@@ -145,7 +142,9 @@ export class GoogleOAuth {
     this.expiresAt = null;
   }
 
-  private applyTokenResponse(response: TokenResponse): void {
+  private applyTokenResponse(
+    response: google.accounts.oauth2.TokenResponse,
+  ): void {
     if (!response.access_token) {
       throw new Error(
         response.error_description ??
@@ -154,15 +153,14 @@ export class GoogleOAuth {
       );
     }
     this.accessToken = response.access_token;
-    if (response.expires_in !== undefined) {
-      this.expiresAt = Date.now() + response.expires_in * 1000;
-    }
+    this.expiresAt =
+      Date.now() + (response.expires_in ?? 3600) * 1000;
   }
 
   private async ensureTokenClient(): Promise<google.accounts.oauth2.TokenClient> {
     if (this.tokenClient) return this.tokenClient;
 
-    await GoogleSignInLoader.load();
+    await loadGoogleSignIn();
     this.tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: this.clientId,
       scope: DRIVE_APPDATA_SCOPE,

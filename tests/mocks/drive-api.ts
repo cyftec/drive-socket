@@ -1,9 +1,8 @@
-import {
-  DRIVE_API,
-  DRIVE_UPLOAD,
-  FOLDER_MIME_TYPE,
-} from "../../src/google/constants.ts";
 import type { DriveMessage } from "../../src/types/index.ts";
+
+const DRIVE_API = "https://www.googleapis.com/drive/v3";
+const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3";
+const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 
 type StoredFile = DriveMessage & {
   createdTime: string;

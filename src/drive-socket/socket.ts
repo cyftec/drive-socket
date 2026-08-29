@@ -3,12 +3,9 @@ import {
   InvalidMimeError,
   MessageExistsError,
 } from "../errors";
-import {
-  GoogleDriveClient,
-  GoogleOAuth,
-  isValidMimeType,
-  mimeToExtension,
-} from "../google";
+import { GoogleDriveClient } from "../google/drive/drive-client.ts";
+import { GoogleOAuth } from "../google/auth/google-oauth.ts";
+import { isValidMimeType, mimeToExtension } from "../google/mime-helpers.ts";
 import type { DriveMessage, DriveSocketConfig } from "../types";
 
 function tokenStorageKey(clientId: string, folderName: string): string {
@@ -17,6 +14,10 @@ function tokenStorageKey(clientId: string, folderName: string): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function folderFilesQuery(parentFolderId: string): string {
+  return `'${parentFolderId}' in parents and trashed=false`;
 }
 
 export class DriveSocket {
@@ -45,7 +46,6 @@ export class DriveSocket {
       config.clientId,
       tokenStorageKey(config.clientId, config.folderName),
     );
-    this.oauth.installPersistListeners();
     this.gDriveClient = new GoogleDriveClient(this.oauth);
 
     this.connect({ interactive: false }).catch(() => {});
@@ -112,9 +112,9 @@ export class DriveSocket {
     return this.folderId;
   }
 
-  private sortFilesByCreatedTimeDesc<T extends { id: string; createdTime: string }>(
-    files: T[],
-  ): T[] {
+  private sortFilesByCreatedTimeDesc<
+    T extends { id: string; createdTime: string },
+  >(files: T[]): T[] {
     return [...files].sort((a, b) => {
       const timeDiff = b.createdTime.localeCompare(a.createdTime);
       return timeDiff !== 0 ? timeDiff : a.id.localeCompare(b.id);
@@ -124,9 +124,8 @@ export class DriveSocket {
   private async downloadFolderMessages(
     folderId: string,
   ): Promise<DriveMessage[]> {
-    const query = this.gDriveClient.buildFolderQuery(folderId);
     const files = this.sortFilesByCreatedTimeDesc(
-      await this.gDriveClient.listAllFiles(query),
+      await this.gDriveClient.listAllFiles(folderFilesQuery(folderId)),
     );
     const messages: DriveMessage[] = [];
 
@@ -193,9 +192,8 @@ export class DriveSocket {
     }
 
     const folderId = await this.ensureFolderId();
-    const query = this.gDriveClient.buildFolderQuery(folderId);
     const files = this.sortFilesByCreatedTimeDesc(
-      await this.gDriveClient.listAllFiles(query),
+      await this.gDriveClient.listAllFiles(folderFilesQuery(folderId)),
     );
 
     if (files.length <= this.config.maxFiles) return;
