@@ -199,6 +199,46 @@ describe("DriveSocket", () => {
       expect(parsed.accessToken).toBe("test-access-token");
     });
 
+    it("clears localStorage when tab becomes visible again", async () => {
+      const socket = new DriveSocket(defaultConfig());
+      await socket.connect();
+
+      Object.defineProperty(document, "visibilityState", {
+        value: "hidden",
+        configurable: true,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(true);
+
+      Object.defineProperty(document, "visibilityState", {
+        value: "visible",
+        configurable: true,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+
+      expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(false);
+      await expect(
+        socket.push(new Blob(["{}"]), {
+          mimeType: "application/json",
+          fileName: "still-auth.json",
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it("keeps localStorage empty while tab stays visible after connect", async () => {
+      const socket = new DriveSocket(defaultConfig());
+      await socket.connect();
+
+      expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(false);
+      await expect(
+        socket.push(new Blob(["{}"]), {
+          mimeType: "application/json",
+          fileName: "active.json",
+        }),
+      ).resolves.toBeDefined();
+      expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(false);
+    });
+
     it("disconnect revokes and clears persisted tokens", async () => {
       const socket = new DriveSocket(defaultConfig());
       await socket.connect();

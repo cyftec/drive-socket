@@ -57,7 +57,7 @@ socket.onReceive(async (messages) => {
 await socket.disconnect();
 ```
 
-On page load, `DriveSocket` silently restores tokens from `localStorage` (if present) and renews them through Google Identity Services when they expire. Tokens are written back to `localStorage` when the tab is hidden or closed — no manual token handling required.
+On page load, `DriveSocket` silently restores tokens from `localStorage` (if present), moves them into memory, and clears storage immediately. While the tab is active, tokens live only in memory — `localStorage` stays empty. Tokens are written to `localStorage` only when the tab is hidden or the browser is closing, so sessions survive restarts without leaving credentials exposed during active use.
 
 Sign-in uses the GIS token model (no backend `client_secret` required). After the user approves access once, the library silently requests new access tokens for hours-long sessions.
 

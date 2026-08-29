@@ -24,12 +24,23 @@ export class GoogleOAuth {
     private readonly storageKey: string,
   ) {
     if (typeof window !== "undefined" && typeof document !== "undefined") {
-      const persist = () => this.persistToLocalStorage();
-      window.addEventListener("pagehide", persist);
-      window.addEventListener("beforeunload", persist);
-      document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "hidden") persist();
+      window.addEventListener("pagehide", () => this.onTabHidden());
+      window.addEventListener("beforeunload", () => this.onTabHidden());
+      window.addEventListener("focus", () => this.onTabVisible());
+      window.addEventListener("pageshow", () => {
+        if (document.visibilityState === "visible") this.onTabVisible();
       });
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") {
+          this.onTabHidden();
+        } else {
+          this.onTabVisible();
+        }
+      });
+
+      if (document.visibilityState === "visible") {
+        this.onTabVisible();
+      }
     }
   }
 
@@ -97,6 +108,17 @@ export class GoogleOAuth {
     this.removeFromLocalStorage();
   }
 
+  private onTabVisible(): void {
+    if (!this.hasValidAccessToken()) {
+      this.loadFromLocalStorage();
+    }
+    this.removeFromLocalStorage();
+  }
+
+  private onTabHidden(): void {
+    this.persistToLocalStorage();
+  }
+
   private loadFromLocalStorage(): void {
     if (typeof localStorage === "undefined") return;
 
@@ -151,6 +173,7 @@ export class GoogleOAuth {
     }
     this.accessToken = response.access_token;
     this.expiresAt = Date.now() + (response.expires_in ?? 3600) * 1000;
+    this.removeFromLocalStorage();
   }
 
   private async ensureTokenClient(): Promise<google.accounts.oauth2.TokenClient> {
