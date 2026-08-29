@@ -17,6 +17,10 @@ function jsonResponse(data: unknown, status = 200): Response {
   });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function parseFileIdFromPath(pathname: string): string | null {
   const match = pathname.match(/\/files\/([^/?]+)/);
   return match?.[1] ?? null;
@@ -47,6 +51,8 @@ function matchesDriveQuery(file: StoredFile, query: string): boolean {
 export class DriveApiFixture {
   readonly files = new Map<string, StoredFile>();
   readonly requests: Array<{ method: string; url: string }> = [];
+  listDelayMs = 0;
+  downloadDelayMs = 0;
   private nextId = 1;
 
   addFile(overrides: Partial<StoredFile> = {}): StoredFile {
@@ -158,11 +164,14 @@ export class DriveApiFixture {
         const id = parseFileIdFromPath(parsed.pathname);
         const file = id ? this.files.get(id) : undefined;
         if (!file) return new Response("not found", { status: 404 });
+        if (this.downloadDelayMs > 0) await sleep(this.downloadDelayMs);
         return new Response(file.fileBlob);
       }
 
       const query = parsed.searchParams.get("q");
       if (query) {
+        if (this.listDelayMs > 0) await sleep(this.listDelayMs);
+
         const matched = [...this.files.values()]
           .filter((file) => matchesDriveQuery(file, query))
           .map(({ id, name, createdTime }) => ({ id, name, createdTime }));

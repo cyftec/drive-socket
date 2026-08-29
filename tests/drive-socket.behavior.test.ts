@@ -427,6 +427,57 @@ describe("DriveSocket", () => {
 
       expect(batches.length).toBe(countBeforeDisconnect);
     });
+
+    it("waits full pollIntervalInMs after a cycle completes before polling again", async () => {
+      const pollIntervalInMs = 80;
+      drive.listDelayMs = 120;
+
+      const socket = new DriveSocket(defaultConfig({ pollIntervalInMs }));
+      await socket.connect();
+      drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
+
+      const callbackTimes: number[] = [];
+      socket.onReceive(() => callbackTimes.push(Date.now()));
+
+      await new Promise((resolve) => setTimeout(resolve, 700));
+
+      expect(callbackTimes.length).toBeGreaterThanOrEqual(2);
+      const gapBetweenCallbacks = callbackTimes[1]! - callbackTimes[0]!;
+      expect(gapBetweenCallbacks).toBeGreaterThanOrEqual(
+        drive.listDelayMs + pollIntervalInMs - 40,
+      );
+    });
+
+    it("waits full pollIntervalInMs after downloads finish before polling again", async () => {
+      const pollIntervalInMs = 80;
+      drive.downloadDelayMs = 120;
+
+      const socket = new DriveSocket(defaultConfig({ pollIntervalInMs }));
+      await socket.connect();
+
+      const folder = drive.addFolder({
+        id: "folder-1",
+        name: "messages",
+        parentId: "appDataFolder",
+      });
+      drive.addFile({
+        id: "file-1",
+        name: "slow.json",
+        parentId: folder.id,
+        fileBlob: new Blob(["slow"]),
+      });
+
+      const callbackTimes: number[] = [];
+      socket.onReceive(() => callbackTimes.push(Date.now()));
+
+      await new Promise((resolve) => setTimeout(resolve, 700));
+
+      expect(callbackTimes.length).toBeGreaterThanOrEqual(2);
+      const gapBetweenCallbacks = callbackTimes[1]! - callbackTimes[0]!;
+      expect(gapBetweenCallbacks).toBeGreaterThanOrEqual(
+        drive.downloadDelayMs + pollIntervalInMs - 40,
+      );
+    });
   });
 
   describe("idle prune", () => {

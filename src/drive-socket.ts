@@ -142,8 +142,6 @@ export class DriveSocket {
 
   private async runPollLoop(): Promise<void> {
     while (this.pollLoopRunning) {
-      const cycleStart = Date.now();
-
       try {
         await this.oauth.ensureAccessToken();
       } catch {
@@ -159,14 +157,11 @@ export class DriveSocket {
           this.onReceiveCallback(messages);
         }
         this.scheduleIdlePrune();
-
-        const elapsed = Date.now() - cycleStart;
-        if (elapsed < this.config.pollIntervalInMs) {
-          await sleep(this.config.pollIntervalInMs - elapsed);
-        }
       } catch {
-        await sleep(this.config.pollIntervalInMs);
+        // wait full interval before retrying
       }
+
+      await sleep(this.config.pollIntervalInMs);
     }
   }
 

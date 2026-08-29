@@ -72,12 +72,14 @@ Sign-in uses the GIS token model (no backend `client_secret` required). After th
 
 ### `onReceive` poll cycle
 
-Each cycle lasts `pollIntervalInMs`:
+Each cycle:
 
 1. List all files in the configured folder
 2. Download every file
 3. Invoke the callback once with all `DriveMessage` values, sorted newest-first
-4. Wait the remainder of the interval before the next cycle
+4. Wait the full `pollIntervalInMs`, then start the next cycle
+
+If a cycle is still running when `pollIntervalInMs` would elapse, the timer is held until that cycle finishes. The next cycle always starts after a full `pollIntervalInMs` wait from completion — elapsed work time is not subtracted from the interval.
 
 ### Config
 
