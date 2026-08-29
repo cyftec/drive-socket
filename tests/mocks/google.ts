@@ -13,7 +13,6 @@ type TokenRequestConfig = {
 };
 
 export function installGoogleOAuthMock(options?: {
-  grantScope?: boolean;
   onTokenInit?: (config: TokenClientConfig) => void;
   onTokenRequest?: (config?: TokenRequestConfig) => void;
   silentFails?: boolean;
@@ -38,7 +37,6 @@ export function installGoogleOAuthMock(options?: {
             },
           };
         },
-        hasGrantedAllScopes: () => options?.grantScope ?? true,
         revoke: (_token: string, callback: () => void) => callback(),
       },
     },

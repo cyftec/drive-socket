@@ -5,23 +5,25 @@ import {
   DRIVE_UPLOAD,
   FOLDER_MIME_TYPE,
 } from "../constants.ts";
-import type {
-  DriveFileMetadata,
-  FilesDownloadResult,
-  FileMetadataField,
-} from "../types.ts";
+import type { ListedDriveFile } from "../types.ts";
 import { parseDriveError } from "./parse-drive-error.ts";
 
 export class GoogleDriveClient {
   constructor(private readonly oauth: GoogleOAuth) {}
 
   private encodeMultipart(
-    metadata: Record<string, unknown>,
-    fileBlob: Blob,
+    fileName: string,
+    parentFolderId: string,
     mimeType: string,
+    fileBlob: Blob,
   ): Blob {
     const boundary = `drive_socket_${crypto.randomUUID()}`;
-    const metaPart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`;
+    const filePart = {
+      name: fileName,
+      parents: [parentFolderId],
+      mimeType,
+    };
+    const metaPart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(filePart)}\r\n`;
     const filePartHeader = `--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`;
     const closing = `\r\n--${boundary}--`;
 
@@ -52,10 +54,8 @@ export class GoogleDriveClient {
   async ensureAppDataFolder(folderName: string): Promise<string> {
     const escapedName = folderName.replace(/'/g, "\\'");
     const query = `name='${escapedName}' and mimeType='${FOLDER_MIME_TYPE}' and trashed=false`;
-    const existing = await this.downloadFiles(query, {
-      metadataFields: ["id"] as ["id"],
-    });
-    const found = existing.files?.[0];
+    const existing = await this.listAllFiles(query);
+    const found = existing[0];
     if (found) return found.id;
 
     const response = await this.request(
@@ -74,57 +74,61 @@ export class GoogleDriveClient {
     return created.id;
   }
 
-  async saveNewFile<F extends FileMetadataField>(
+  async saveNewFile(
     fileName: string,
     mimeType: string,
     fileBlob: Blob,
     parentFolderId: string,
-    metadataFields = ["id", "name", "createdTime", "mimeType", "size"] as F[],
-  ): Promise<DriveFileMetadata<F>> {
-    const fileMetadata = {
-      name: fileName,
-      parents: [parentFolderId],
+  ): Promise<Pick<ListedDriveFile, "id" | "name">> {
+    const body = this.encodeMultipart(
+      fileName,
+      parentFolderId,
       mimeType,
-    };
-    const body = this.encodeMultipart(fileMetadata, fileBlob, mimeType);
+      fileBlob,
+    );
     const response = await this.request(
-      `/files?uploadType=multipart&fields=${metadataFields.join(",")}`,
+      "/files?uploadType=multipart&fields=id,name",
       { method: "POST", body },
       DRIVE_UPLOAD,
     );
     return await response.json();
   }
 
-  async downloadFiles<F extends FileMetadataField>(
+  async listAllFiles(
     query: string,
-    options: {
-      pageToken?: string;
-      pageSize?: number;
-      orderBy?: string;
-      metadataFields?: F[];
-    } = {
-      metadataFields: ["id", "name", "createdTime", "mimeType", "size"] as F[],
-    },
-  ): Promise<FilesDownloadResult<F>> {
-    const params = new URLSearchParams({
-      spaces: "appDataFolder",
-      q: query,
-      fields: `nextPageToken,files(${(options?.metadataFields || []).join(",")})`,
-      pageSize: String(options?.pageSize ?? 100),
-    });
-    if (options?.orderBy) params.set("orderBy", options.orderBy);
-    if (options?.pageToken) params.set("pageToken", options.pageToken);
-    const response = await this.request(`/files?${params.toString()}`);
-    return await response.json();
+    options: { orderBy?: string } = {},
+  ): Promise<ListedDriveFile[]> {
+    const files: ListedDriveFile[] = [];
+    let pageToken: string | undefined;
+
+    do {
+      const params = new URLSearchParams({
+        spaces: "appDataFolder",
+        q: query,
+        fields: "nextPageToken,files(id,name,createdTime)",
+        pageSize: "100",
+      });
+      if (options.orderBy) params.set("orderBy", options.orderBy);
+      if (pageToken) params.set("pageToken", pageToken);
+
+      const response = await this.request(`/files?${params.toString()}`);
+      const result = (await response.json()) as {
+        files?: ListedDriveFile[];
+        nextPageToken?: string;
+      };
+      for (const file of result.files ?? []) files.push(file);
+      pageToken = result.nextPageToken;
+    } while (pageToken);
+
+    return files;
   }
 
-  async downloadFile(fileId: string, signal?: AbortSignal): Promise<Blob> {
+  async downloadFile(fileId: string): Promise<Blob> {
     await this.oauth.ensureAccessToken();
     const token = this.oauth.getAccessToken();
     if (!token) throw new NotAuthenticatedError();
     const response = await fetch(`${DRIVE_API}/files/${fileId}?alt=media`, {
       headers: { Authorization: `Bearer ${token}` },
-      signal,
     });
     if (!response.ok) throw await parseDriveError(response);
     return response.blob();
@@ -137,8 +141,8 @@ export class GoogleDriveClient {
   async fileExists(fileName: string, parentFolderId: string): Promise<boolean> {
     const escapedName = fileName.replace(/'/g, "\\'");
     const query = `name='${escapedName}' and '${parentFolderId}' in parents and trashed=false`;
-    const result = await this.downloadFiles(query);
-    return (result.files?.length ?? 0) > 0;
+    const files = await this.listAllFiles(query);
+    return files.length > 0;
   }
 
   buildFolderQuery(parentFolderId: string): string {

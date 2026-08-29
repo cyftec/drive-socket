@@ -4,7 +4,6 @@ declare namespace google.accounts.oauth2 {
     error?: string;
     error_description?: string;
     expires_in?: number;
-    scope?: string;
   }
 
   interface TokenClientConfig {
@@ -14,7 +13,6 @@ declare namespace google.accounts.oauth2 {
   }
 
   interface OverridableTokenClientConfig {
-    scope?: string;
     prompt?: string;
   }
 
@@ -25,7 +23,6 @@ declare namespace google.accounts.oauth2 {
   }
 
   function initTokenClient(config: TokenClientConfig): TokenClient;
-  function hasGrantedAllScopes(response: TokenResponse, ...scopes: string[]): boolean;
   function revoke(token: string, callback: (done: { successful: boolean }) => void): void;
 }
 

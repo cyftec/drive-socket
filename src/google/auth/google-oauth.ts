@@ -32,7 +32,7 @@ export class GoogleOAuth {
     private readonly storageKey: string,
   ) {}
 
-  hasValidAccessToken(): boolean {
+  private hasValidAccessToken(): boolean {
     if (!this.accessToken) return false;
     if (this.expiresAt === null) return true;
     return this.expiresAt > Date.now() + TOKEN_EXPIRY_SKEW_MS;
@@ -79,19 +79,18 @@ export class GoogleOAuth {
     const interactive = options?.interactive ?? true;
 
     this.loadFromLocalStorage();
-
     if (this.hasValidAccessToken()) return;
 
-    try {
-      await this.acquireAccessToken({ interactive: false });
-      if (this.hasValidAccessToken()) return;
-    } catch {
-      if (!interactive) return;
+    if (interactive) {
+      await this.ensureAccessToken({ interactive: true });
+      return;
     }
 
-    if (!interactive) return;
-
-    await this.acquireAccessToken({ interactive: true });
+    try {
+      await this.ensureAccessToken({ interactive: false });
+    } catch {
+      // silent connect stops when tokens cannot be restored
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -122,7 +121,7 @@ export class GoogleOAuth {
     }
   }
 
-  persistToLocalStorage(): void {
+  private persistToLocalStorage(): void {
     if (typeof localStorage === "undefined") return;
     if (!this.accessToken) {
       this.removeFromLocalStorage();

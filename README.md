@@ -46,14 +46,12 @@ await socket.push(fileBlob, {
   fileName: "hello.json",
 });
 
-// Receive messages: metadata list per cycle, then one file per callback
-socket.onReceive(async (event) => {
-  if (event.type === "metadata") {
-    console.log("metadata", event.files.length);
-    return;
+// Receive all folder files each poll cycle (downloaded, newest first)
+socket.onReceive(async (messages) => {
+  for (const message of messages) {
+    const text = await message.fileBlob.text();
+    console.log(message.name, text);
   }
-  const text = await event.message.fileBlob.text();
-  console.log(event.message.name, text);
 });
 
 await socket.disconnect();
@@ -70,16 +68,16 @@ Sign-in uses the GIS token model (no backend `client_secret` required). After th
 | `connect(options?)` | Restore tokens from `localStorage`, silent GIS token renewal, or interactive OAuth sign-in |
 | `disconnect()` | Revoke token, stop polling, clear persisted tokens |
 | `push(fileBlob, { mimeType, fileName })` | Upload immutable message into configured subfolder |
-| `onReceive(callback)` | Poll on `pollIntervalInMs`; emit metadata then stream file messages newest-first |
+| `onReceive(callback)` | Poll on `pollIntervalInMs`; download and emit all folder files each cycle |
 
 ### `onReceive` poll cycle
 
 Each cycle lasts `pollIntervalInMs`:
 
-1. Fetch all file metadata in the configured folder → `{ type: "metadata", files }`
-2. Download one file at a time (newest first) → `{ type: "file", message }` per file
-3. If downloads exceed the interval, abort remaining and restart from the latest metadata
-4. If all files finish early, wait the remainder of the interval before the next cycle
+1. List all files in the configured folder
+2. Download every file
+3. Invoke the callback once with all `DriveMessage` values, sorted newest-first
+4. Wait the remainder of the interval before the next cycle
 
 ### Config
 
@@ -89,7 +87,14 @@ Each cycle lasts `pollIntervalInMs`:
 | `folderName` | Subfolder name inside `appDataFolder` |
 | `pollIntervalInMs` | Poll cycle length in milliseconds |
 | `maxFiles` | Maximum files kept in folder (oldest pruned on browser idle) |
-| `metadataFields?` | Extra Drive metadata fields beyond defaults |
+
+### `DriveMessage`
+
+| Property | Description |
+|----------|-------------|
+| `id` | Google Drive file ID |
+| `name` | File name in the folder |
+| `fileBlob` | Downloaded file contents |
 
 ## MIME types
 

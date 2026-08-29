@@ -12,8 +12,8 @@ import {
   NotAuthenticatedError,
 } from "../src/errors/index.ts";
 import { DriveSocket } from "../src/index.ts";
-import type { DriveSocketConfig, OnReceiveEvent } from "../src/types/index.ts";
-import { DRIVE_APPDATA_SCOPE, FOLDER_MIME_TYPE } from "../src/google/constants.ts";
+import type { DriveMessage, DriveSocketConfig } from "../src/types/index.ts";
+import { DRIVE_APPDATA_SCOPE } from "../src/google/constants.ts";
 import { clearGoogleOAuthMock, installGoogleOAuthMock } from "./mocks/google.ts";
 import { DriveApiFixture } from "./mocks/drive-api.ts";
 
@@ -46,10 +46,6 @@ function installLocalStorageMock(): { storage: Map<string, string> } {
     configurable: true,
   });
   return { storage };
-}
-
-function listQueryFromUrl(url: string): string | null {
-  return new URL(url).searchParams.get("q");
 }
 
 function installBrowserGlobals(): void {
@@ -296,31 +292,25 @@ describe("DriveSocket", () => {
       ).rejects.toBeInstanceOf(MessageExistsError);
     });
 
-    it("requests configured metadata fields on upload", async () => {
-      const socket = new DriveSocket<"md5Checksum">({
-        ...defaultConfig(),
-        metadataFields: ["md5Checksum"],
-      });
+    it("returns uploaded message with fileBlob", async () => {
+      const socket = new DriveSocket(defaultConfig());
       await socket.connect();
       drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
 
-      await socket.push(new Blob(["{}"]), {
+      const fileBlob = new Blob(["{}"]);
+      const message = await socket.push(fileBlob, {
         mimeType: "application/json",
         fileName: "meta.json",
       });
 
-      const uploadRequest = drive.requests.find(
-        ({ method, url }) =>
-          method === "POST" && url.includes("uploadType=multipart"),
-      );
-      expect(uploadRequest?.url).toContain(
-        "fields=id,name,createdTime,mimeType,size,md5Checksum",
-      );
+      expect(message.fileBlob).toBe(fileBlob);
+      expect(message.name).toBe("meta.json");
+      expect(message.id).toBeTruthy();
     });
   });
 
   describe("onReceive", () => {
-    it("emits metadata then file events newest-first", async () => {
+    it("emits all downloaded files newest-first in one callback", async () => {
       const socket = new DriveSocket(defaultConfig({ pollIntervalInMs: 200 }));
       await socket.connect();
 
@@ -344,21 +334,16 @@ describe("DriveSocket", () => {
         fileBlob: new Blob(["newer"]),
       });
 
-      const events: OnReceiveEvent<"id" | "name" | "createdTime" | "mimeType" | "size">[] = [];
-      socket.onReceive((event) => events.push(event));
+      const batches: DriveMessage[][] = [];
+      socket.onReceive((messages) => batches.push(messages));
 
       await new Promise((resolve) => setTimeout(resolve, 350));
 
-      const metadataEvent = events.find((e) => e.type === "metadata");
-      expect(metadataEvent?.type === "metadata" && metadataEvent.files.map((f) => f.id)).toEqual([
-        "newer",
-        "older",
-      ]);
-
-      const fileEvents = events.filter((e) => e.type === "file");
-      expect(fileEvents.length).toBeGreaterThanOrEqual(2);
-      const firstFile = fileEvents[0];
-      expect(firstFile?.type === "file" && firstFile.message.id).toBe("newer");
+      const latestBatch = batches.at(-1);
+      expect(latestBatch?.map((message) => message.id)).toEqual(["newer", "older"]);
+      expect(latestBatch?.every((message) => message.fileBlob instanceof Blob)).toBe(
+        true,
+      );
     });
 
     it("renews expired tokens during polling without user interaction", async () => {
@@ -377,13 +362,13 @@ describe("DriveSocket", () => {
 
       await new Promise((resolve) => setTimeout(resolve, 1_100));
 
-      const events: OnReceiveEvent<"id" | "name" | "createdTime" | "mimeType" | "size">[] = [];
-      socket.onReceive((event) => events.push(event));
+      const batches: DriveMessage[][] = [];
+      socket.onReceive((messages) => batches.push(messages));
 
       await new Promise((resolve) => setTimeout(resolve, 250));
 
       expect(silentRequestCount).toBeGreaterThan(0);
-      expect(events.some((event) => event.type === "metadata")).toBe(true);
+      expect(batches.length).toBeGreaterThan(0);
     });
 
     it("stops polling after disconnect", async () => {
@@ -391,15 +376,15 @@ describe("DriveSocket", () => {
       await socket.connect();
       drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
 
-      const events: OnReceiveEvent<"id" | "name" | "createdTime" | "mimeType" | "size">[] = [];
-      socket.onReceive((event) => events.push(event));
+      const batches: DriveMessage[][] = [];
+      socket.onReceive((messages) => batches.push(messages));
 
       await new Promise((resolve) => setTimeout(resolve, 80));
-      const countBeforeDisconnect = events.length;
+      const countBeforeDisconnect = batches.length;
       await socket.disconnect();
       await new Promise((resolve) => setTimeout(resolve, 120));
 
-      expect(events.length).toBe(countBeforeDisconnect);
+      expect(batches.length).toBe(countBeforeDisconnect);
     });
   });
 

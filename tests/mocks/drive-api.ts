@@ -3,12 +3,11 @@ import {
   DRIVE_UPLOAD,
   FOLDER_MIME_TYPE,
 } from "../../src/google/constants.ts";
-import type { FileMetadata } from "../../src/types/index.ts";
-import { sampleMetadata } from "../fixtures/metadata.ts";
+import type { DriveMessage } from "../../src/types/index.ts";
 
-type DefaultFileFields = "id" | "name" | "createdTime" | "mimeType" | "size";
-type StoredFile = FileMetadata<DefaultFileFields> & {
-  fileBlob: Blob;
+type StoredFile = DriveMessage & {
+  createdTime: string;
+  mimeType: string;
   parentId: string;
 };
 
@@ -43,18 +42,6 @@ function matchesDriveQuery(file: StoredFile, query: string): boolean {
   );
   if (folderMimeMatch && file.mimeType !== FOLDER_MIME_TYPE) return false;
 
-  const gteMatch = query.match(/createdTime >= '([^']+)'/);
-  if (gteMatch?.[1] && file.createdTime < gteMatch[1]) return false;
-
-  const gtMatch = query.match(/createdTime > '([^']+)'/);
-  if (gtMatch?.[1] && file.createdTime <= gtMatch[1]) return false;
-
-  const lteMatch = query.match(/createdTime <= '([^']+)'/);
-  if (lteMatch?.[1] && file.createdTime > lteMatch[1]) return false;
-
-  const ltMatch = query.match(/createdTime < '([^']+)'/);
-  if (ltMatch?.[1] && file.createdTime >= ltMatch[1]) return false;
-
   return true;
 }
 
@@ -62,18 +49,14 @@ export class DriveApiFixture {
   readonly files = new Map<string, StoredFile>();
   readonly requests: Array<{ method: string; url: string }> = [];
   private nextId = 1;
-  private listPageCache = new Map<string, FileMetadata<DefaultFileFields>[]>();
 
-  addFile(
-    overrides: Partial<FileMetadata<DefaultFileFields>> & {
-      fileBlob?: Blob;
-      parentId?: string;
-    } = {},
-  ): StoredFile {
+  addFile(overrides: Partial<StoredFile> = {}): StoredFile {
     const id = overrides.id ?? `file-${this.nextId++}`;
     const file: StoredFile = {
-      ...sampleMetadata(overrides),
       id,
+      name: overrides.name ?? "message.json",
+      createdTime: overrides.createdTime ?? "2026-01-01T00:00:00.000Z",
+      mimeType: overrides.mimeType ?? "application/json",
       fileBlob: overrides.fileBlob ?? new Blob(['{"hello":"world"}']),
       parentId: overrides.parentId ?? "appDataFolder",
     };
@@ -81,11 +64,7 @@ export class DriveApiFixture {
     return file;
   }
 
-  addFolder(
-    overrides: Partial<FileMetadata<DefaultFileFields>> & {
-      parentId?: string;
-    } = {},
-  ): StoredFile {
+  addFolder(overrides: Partial<StoredFile> = {}): StoredFile {
     return this.addFile({
       ...overrides,
       mimeType: FOLDER_MIME_TYPE,
@@ -125,20 +104,21 @@ export class DriveApiFixture {
           if (mimeMatch?.[1]) mimeType = mimeMatch[1];
           if (parentMatch?.[1]) parentId = parentMatch[1];
         }
-        const created = sampleMetadata({ id, name, mimeType });
-        const fileBlob =
-          mimeType === FOLDER_MIME_TYPE
-            ? new Blob()
-            : init?.body instanceof Blob
-              ? new Blob([init.body])
-              : new Blob();
-        const stored: StoredFile = {
-          ...created,
-          fileBlob,
+        const file: StoredFile = {
+          id,
+          name,
+          createdTime: "2026-01-02T00:00:00.000Z",
+          mimeType,
+          fileBlob:
+            mimeType === FOLDER_MIME_TYPE
+              ? new Blob()
+              : init?.body instanceof Blob
+                ? new Blob([init.body])
+                : new Blob(),
           parentId,
         };
-        this.files.set(id, stored);
-        return jsonResponse(created);
+        this.files.set(id, file);
+        return jsonResponse({ id, name });
       }
 
       if (!url.startsWith(DRIVE_API)) {
@@ -159,17 +139,15 @@ export class DriveApiFixture {
       if (method === "POST") {
         const body = init?.body ? JSON.parse(String(init.body)) : {};
         const id = `file-${this.nextId++}`;
-        const created = sampleMetadata({
+        const file: StoredFile = {
           id,
           name: body.name ?? "folder",
+          createdTime: new Date().toISOString(),
           mimeType: body.mimeType ?? FOLDER_MIME_TYPE,
-        });
-        const stored: StoredFile = {
-          ...created,
           fileBlob: new Blob(),
           parentId: body.parents?.[0] ?? "appDataFolder",
         };
-        this.files.set(id, stored);
+        this.files.set(id, file);
         return jsonResponse({ id });
       }
 
@@ -186,31 +164,14 @@ export class DriveApiFixture {
 
       const query = parsed.searchParams.get("q");
       if (query) {
-        const pageToken = parsed.searchParams.get("pageToken");
         const matched = [...this.files.values()]
           .filter((file) => matchesDriveQuery(file, query))
-          .map(({ fileBlob: _fileBlob, parentId: _parentId, ...metadata }) => metadata);
-
-        if (pageToken) {
-          return jsonResponse({ files: this.listPageCache.get(pageToken) ?? [] });
-        }
-
-        if (matched.length > 2) {
-          this.listPageCache.set("page-2", matched.slice(2));
-          return jsonResponse({
-            files: matched.slice(0, 2),
-            nextPageToken: "page-2",
-          });
-        }
+          .map(({ id, name, createdTime }) => ({ id, name, createdTime }));
 
         return jsonResponse({ files: matched });
       }
 
-      const id = parseFileIdFromPath(parsed.pathname);
-      const file = id ? this.files.get(id) : undefined;
-      if (!file) return new Response("not found", { status: 404 });
-      const { fileBlob: _fileBlob, parentId: _parentId, ...metadata } = file;
-      return jsonResponse(metadata);
+      return new Response("not found", { status: 404 });
     };
 
     globalThis.fetch = fetchMock as typeof fetch;
