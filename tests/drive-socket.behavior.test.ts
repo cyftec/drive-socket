@@ -391,6 +391,43 @@ describe("DriveSocket", () => {
       );
     });
 
+    it("includes failed downloads as error messages in the batch", async () => {
+      const folder = addMessagesFolder();
+      drive.addFile({
+        id: "ok",
+        name: "ok.json",
+        createdTime: "2026-01-02T00:00:00.000Z",
+        parentId: folder.id,
+        fileBlob: new Blob(["ok"]),
+      });
+      drive.addFile({
+        id: "bad",
+        name: "bad.json",
+        createdTime: "2026-01-01T00:00:00.000Z",
+        parentId: folder.id,
+        fileBlob: new Blob(["bad"]),
+      });
+      drive.failDownloadIds.add("bad");
+
+      const socket = createSocket({ pollIntervalInMs: 200 });
+      await socket.connect();
+
+      const batches: DriveMessage[][] = [];
+      socket.onReceive((messages) => batches.push(messages));
+
+      await new Promise((resolve) => setTimeout(resolve, 350));
+
+      const latestBatch = batches.at(-1);
+      expect(latestBatch?.map((message) => message.id)).toEqual(["ok", "bad"]);
+      expect(latestBatch?.find((message) => message.id === "ok")?.isError).toBeUndefined();
+      expect(latestBatch?.find((message) => message.id === "bad")).toEqual({
+        id: "bad",
+        name: "bad.json",
+        fileBlob: expect.any(Blob),
+        isError: true,
+      });
+    });
+
     it("renews expired tokens during polling without user interaction", async () => {
       let silentRequestCount = 0;
       clearGoogleOAuthMock();

@@ -132,8 +132,17 @@ export class DriveSocket {
     );
     return Promise.all(
       files.map(async (file) => {
-        const fileBlob = await this.gDriveClient.downloadFile(file.id);
-        return { id: file.id, name: file.name, fileBlob };
+        try {
+          const fileBlob = await this.gDriveClient.downloadFile(file.id);
+          return { id: file.id, name: file.name, fileBlob };
+        } catch {
+          return {
+            id: file.id,
+            name: file.name,
+            fileBlob: new Blob(),
+            isError: true,
+          };
+        }
       }),
     );
   }

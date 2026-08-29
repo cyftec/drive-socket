@@ -58,6 +58,7 @@ export class DriveApiFixture {
   listDelayMs = 0;
   downloadDelayMs = 0;
   folderContentsListDelayMs = 0;
+  failDownloadIds = new Set<string>();
   private nextId = 1;
 
   addFile(overrides: Partial<StoredFile> = {}): StoredFile {
@@ -168,7 +169,9 @@ export class DriveApiFixture {
       if (parsed.searchParams.get("alt") === "media") {
         const id = parseFileIdFromPath(parsed.pathname);
         const file = id ? this.files.get(id) : undefined;
-        if (!file) return new Response("not found", { status: 404 });
+        if (!file || (id && this.failDownloadIds.has(id))) {
+          return new Response("not found", { status: 404 });
+        }
         if (this.downloadDelayMs > 0) await sleep(this.downloadDelayMs);
         return new Response(file.fileBlob);
       }
