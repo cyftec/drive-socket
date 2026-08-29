@@ -1,6 +1,6 @@
 {
   "name": "@cyftec/drive-socket",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Google Drive appDataFolder messaging for static PWAs — push, receive, and prune immutable file messages over HTTP.",
   "license": "MIT",
   "author": "Cyftec",
