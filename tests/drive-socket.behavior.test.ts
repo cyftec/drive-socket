@@ -694,6 +694,41 @@ describe("DriveSocket", () => {
     });
   });
 
+  describe("delete", () => {
+    it("deletes a message by id", async () => {
+      const folder = addMessagesFolder();
+      const file = drive.addFile({
+        id: "msg-1",
+        name: "remove.json",
+        parentId: folder.id,
+      });
+
+      const socket = createSocket();
+      await socket.connect();
+
+      await socket.delete(file.id);
+
+      expect(drive.files.has("msg-1")).toBe(false);
+      expect(
+        drive.requests.some(
+          ({ method, url }) =>
+            method === "DELETE" && url.includes("/files/msg-1"),
+        ),
+      ).toBe(true);
+    });
+
+    it("rejects when not authenticated", async () => {
+      clearGoogleOAuthMock();
+      installGoogleOAuthMock({ silentFails: true });
+
+      const socket = createSocket({ pollIntervalInMs: 50_000 });
+
+      await expect(socket.delete("msg-1")).rejects.toBeInstanceOf(
+        NotAuthenticatedError,
+      );
+    });
+  });
+
   describe("prune", () => {
     it("deletes oldest files beyond maxFiles after push", async () => {
       const folder = addMessagesFolder();

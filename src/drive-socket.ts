@@ -124,6 +124,11 @@ export class DriveSocket {
     return { ...saved, fileBlob };
   }
 
+  async delete(messageId: string): Promise<void> {
+    await this.ensureFolderId();
+    await this.gDriveClient.deleteFile(messageId);
+  }
+
   onReceive(callback: (messages: DriveMessage[]) => void): void {
     this.onReceiveCallback = callback;
   }
