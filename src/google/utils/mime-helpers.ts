@@ -134,3 +134,167 @@ export function supportedMimeType(
 export function mimeToExtension(mimeType: SupportedMimeType): string {
   return MIME_TO_EXTENSION[mimeType];
 }
+
+export const fileExtensionColors: Record<
+  (typeof MIME_TO_EXTENSION)[SupportedMimeType],
+  string
+> = {
+  atom: "#E6652F", // Atom feed / XML-orange
+  epub: "#8E44AD", // ebook / EPUB
+  json: "#F7DF1E", // JSON's familiar yellow
+  jsonld: "#F7DF1E",
+  doc: "#185ABD", // Microsoft Word blue
+  pdf: "#E2231A", // Adobe PDF red
+  ps: "#E2231A", // PostScript / Adobe red
+  rtf: "#185ABD", // document / Word blue
+
+  gdoc: "#4285F4", // Google Docs blue
+  gdraw: "#F4B400", // Google Drawings yellow
+  gform: "#673AB7", // Google Forms purple
+  gtable: "#34A853", // Google Tables / spreadsheet green
+  gjam: "#F4B400", // Jamboard yellow
+  gmap: "#34A853", // Google Maps / Google green
+  gphoto: "#4285F4", // Google Photos blue
+  gslides: "#F4B400", // Google Slides yellow/orange
+  gscript: "#4285F4", // Apps Script / Google blue
+  gshortcut: "#5F6368", // neutral Google gray
+  gsite: "#4285F4", // Google Sites blue
+  gsheet: "#34A853", // Google Sheets green
+  gvideo: "#EA4335", // Google video / red
+  gdaudio: "#A142F4", // Google audio / purple
+  "gdrive-sdk": "#5F6368",
+  gfile: "#5F6368",
+  gfolder: "#5F6368",
+
+  xls: "#107C41", // Excel green
+  xlsm: "#107C41",
+  xlsx: "#107C41",
+
+  ppt: "#D24726", // PowerPoint orange
+  pptm: "#D24726",
+  pptx: "#D24726",
+
+  docm: "#185ABD",
+  docx: "#185ABD",
+
+  odc: "#0F9D58", // OpenDocument chart → green
+  odb: "#795548", // OpenDocument database → brown
+  odf: "#9E9E9E", // formula → neutral
+  odg: "#F4B400", // graphics → yellow
+  odp: "#D24726", // presentation → orange
+  ods: "#107C41", // spreadsheet → green
+  odt: "#185ABD", // text document → blue
+
+  vsd: "#3955A3", // Microsoft Visio blue
+
+  // ─────────────────────────────────────
+  // Packages / archives / binaries
+  // ─────────────────────────────────────
+
+  gz: "#607D8B", // gzip
+  bin: "#607D8B", // generic binary
+  p7m: "#607D8B", // cryptographic container
+  p8: "#607D8B",
+  azw: "#FF9900", // Amazon / Kindle orange
+  apk: "#3DDC84", // Android green
+  mpkg: "#A2AAAD", // Apple installer / neutral Apple gray
+  pkpass: "#111111", // Apple Wallet black
+  rar: "#315A9E", // WinRAR blue
+  "7z": "#555555", // 7-Zip neutral/dark
+  torrent: "#05A8E0", // BitTorrent cyan
+  bz: "#607D8B",
+  bz2: "#607D8B",
+  cdf: "#607D8B",
+  deb: "#A80030", // Debian red
+  arc: "#607D8B",
+  gtar: "#607D8B",
+  tar: "#607D8B",
+  zip: "#F4B400", // archive yellow/gold
+
+  // ─────────────────────────────────────
+  // Programming / web / data
+  // ─────────────────────────────────────
+
+  wasm: "#654FF0", // WebAssembly purple
+  csh: "#4EAA25", // shell / Unix green
+  php: "#777BB4", // PHP purple
+  exe: "#0078D4", // Windows / Microsoft blue
+  sh: "#4EAA25", // shell green
+  swf: "#FF0000", // Flash red
+  urlencoded: "#607D8B",
+  crt: "#607D8B", // certificate
+  yaml: "#CB171E", // YAML red
+  xml: "#F16529", // XML / markup orange
+
+  md: "#24292F", // Markdown / GitHub dark
+  txt: "#666666", // neutral text
+  csv: "#107C41", // spreadsheet green
+  tsv: "#107C41",
+  ics: "#4285F4", // calendar blue
+  vcf: "#4285F4", // contacts blue
+  vtt: "#607D8B", // subtitles/captions
+
+  // ─────────────────────────────────────
+  // Audio
+  // ─────────────────────────────────────
+
+  aac: "#A142F4", // purple
+  flac: "#A142F4",
+  midi: "#7E57C2",
+  m4a: "#A142F4",
+  mp3: "#A142F4",
+  oga: "#A142F4",
+  opus: "#7E57C2",
+  wav: "#7E57C2",
+  weba: "#7E57C2",
+
+  // ─────────────────────────────────────
+  // Fonts
+  // ─────────────────────────────────────
+
+  ttc: "#607D8B",
+  otf: "#607D8B",
+  ttf: "#607D8B",
+  woff: "#607D8B",
+  woff2: "#607D8B",
+
+  // ─────────────────────────────────────
+  // Images
+  // ─────────────────────────────────────
+
+  avif: "#00A4EF",
+  bmp: "#1976D2",
+  gif: "#9C27B0",
+  heic: "#607D8B",
+  heif: "#607D8B",
+  jpg: "#4285F4",
+  png: "#1976D2",
+  svg: "#FF8A00",
+  tiff: "#607D8B",
+  ico: "#607D8B",
+  webp: "#4285F4",
+
+  // ─────────────────────────────────────
+  // 3D / CAD / models
+  // ─────────────────────────────────────
+
+  gltf: "#FF6F00",
+  glb: "#FF6F00",
+  obj: "#607D8B",
+  stl: "#607D8B",
+
+  // ─────────────────────────────────────
+  // Video
+  // ─────────────────────────────────────
+
+  "3gp": "#E53935",
+  ts: "#E53935",
+  mp4: "#E53935",
+  mpeg: "#E53935",
+  ogv: "#E53935",
+  mov: "#1976D2",
+  webm: "#1976D2",
+  flv: "#E53935",
+  mkv: "#7E57C2",
+  avi: "#1976D2",
+};
