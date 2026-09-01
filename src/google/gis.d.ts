@@ -17,13 +17,14 @@ declare namespace google.accounts.oauth2 {
   }
 
   interface TokenClient {
-    requestAccessToken: (
-      overrideConfig?: OverridableTokenClientConfig,
-    ) => void;
+    requestAccessToken: (overrideConfig?: OverridableTokenClientConfig) => void;
   }
 
   function initTokenClient(config: TokenClientConfig): TokenClient;
-  function revoke(token: string, callback: (done: { successful: boolean }) => void): void;
+  function revoke(
+    token: string,
+    callback: (done: { successful: boolean }) => void,
+  ): void;
 }
 
 declare const google: {

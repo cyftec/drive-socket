@@ -9,7 +9,20 @@ import {
   mimeToExtension,
   supportedMimeType,
 } from "./google";
-import type { DriveMessage, DriveSocketConfig } from "./types";
+
+export interface DriveMessage {
+  id: string;
+  name: string;
+  fileBlob: Blob;
+  isError?: boolean;
+}
+
+export interface DriveSocketConfig {
+  clientId: string;
+  folderName: string;
+  pollIntervalInMs: number;
+  maxFiles: number;
+}
 
 function tokenStorageKey(clientId: string, folderName: string): string {
   return `drive-socket:tokens:${clientId}:${folderName}`;
@@ -79,7 +92,9 @@ export class DriveSocket {
       throw new Error("Not connected. Call connect() first.");
     }
     if (!this.onReceiveCallback) {
-      throw new Error("No receive callback registered. Call onReceive() first.");
+      throw new Error(
+        "No receive callback registered. Call onReceive() first.",
+      );
     }
 
     this.pollLoopRunning = true;

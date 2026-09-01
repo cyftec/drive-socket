@@ -1,6 +1,5 @@
-import { DRIVE_APPDATA_SCOPE } from "./utils";
 import { NotAuthenticatedError } from "../errors/not-authenticated-error.ts";
-import { loadGoogleSignIn } from "./sign-in-loader.ts";
+import { loadGsiScript } from "./gsi-script-loader.ts";
 
 interface StoredTokens {
   accessToken: string;
@@ -99,7 +98,7 @@ export class GoogleOAuth {
   async disconnect(): Promise<void> {
     const token = this.accessToken;
     if (token) {
-      await loadGoogleSignIn();
+      await loadGsiScript();
       await new Promise<void>((resolve) => {
         google.accounts.oauth2.revoke(token, () => resolve());
       });
@@ -179,7 +178,8 @@ export class GoogleOAuth {
   private async ensureTokenClient(): Promise<google.accounts.oauth2.TokenClient> {
     if (this.tokenClient) return this.tokenClient;
 
-    await loadGoogleSignIn();
+    await loadGsiScript();
+    const DRIVE_APPDATA_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
     this.tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: this.clientId,
       scope: DRIVE_APPDATA_SCOPE,
