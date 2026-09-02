@@ -1,19 +1,19 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
   FilenameExtensionMismatchError,
   InvalidMimeError,
   MessageExistsError,
   NotAuthenticatedError,
 } from "../src/errors/index.ts";
-import { DriveSocket } from "../src/index.ts";
-import type { DriveMessage, DriveSocketConfig } from "../src/types/index.ts";
-import { clearGoogleOAuthMock, installGoogleOAuthMock } from "./mocks/google.ts";
+import {
+  DriveSocket,
+  type DriveMessage,
+  type DriveSocketConfig,
+} from "../src/index.ts";
+import {
+  clearGoogleOAuthMock,
+  installGoogleOAuthMock,
+} from "./mocks/google.ts";
 import { DriveApiFixture } from "./mocks/drive-api.ts";
 
 const TOKEN_KEY = "drive-socket:tokens:client-id:messages";
@@ -47,42 +47,6 @@ function installLocalStorageMock(): { storage: Map<string, string> } {
   return { storage };
 }
 
-function installBrowserGlobals(): void {
-  const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
-
-  Object.defineProperty(globalThis, "window", {
-    value: globalThis,
-    configurable: true,
-  });
-
-  Object.defineProperty(globalThis, "document", {
-    value: {
-      visibilityState: "visible",
-      addEventListener: (
-        type: string,
-        listener: EventListenerOrEventListenerObject,
-      ) => {
-        if (!listeners.has(type)) listeners.set(type, new Set());
-        listeners.get(type)!.add(listener);
-      },
-      dispatchEvent: (event: Event) => {
-        const typeListeners = listeners.get(event.type);
-        if (typeListeners) {
-          for (const listener of typeListeners) {
-            if (typeof listener === "function") {
-              listener(event);
-            } else {
-              listener.handleEvent(event);
-            }
-          }
-        }
-        return true;
-      },
-    },
-    configurable: true,
-  });
-}
-
 describe("DriveSocket", () => {
   let drive: DriveApiFixture;
   let restoreFetch: () => void;
@@ -106,7 +70,6 @@ describe("DriveSocket", () => {
   }
 
   beforeEach(() => {
-    installBrowserGlobals();
     drive = new DriveApiFixture();
     localStorageMock = installLocalStorageMock();
     installGoogleOAuthMock();
@@ -114,16 +77,18 @@ describe("DriveSocket", () => {
   });
 
   afterEach(async () => {
-    await Promise.all(openSockets.splice(0).map((socket) => socket.disconnect()));
+    await Promise.all(
+      openSockets.splice(0).map((socket) => socket.disconnect()),
+    );
     restoreFetch();
     clearGoogleOAuthMock();
   });
 
   describe("config validation", () => {
     it("rejects non-positive pollIntervalInMs", () => {
-      expect(() => new DriveSocket(defaultConfig({ pollIntervalInMs: 0 }))).toThrow(
-        "pollIntervalInMs must be > 0",
-      );
+      expect(
+        () => new DriveSocket(defaultConfig({ pollIntervalInMs: 0 })),
+      ).toThrow("pollIntervalInMs must be > 0");
     });
 
     it("rejects negative maxFiles", () => {
@@ -140,7 +105,7 @@ describe("DriveSocket", () => {
   });
 
   describe("auth", () => {
-    it("loads tokens from localStorage on connect and clears storage", async () => {
+    it("loads tokens from localStorage on connect", async () => {
       localStorageMock.storage.set(
         TOKEN_KEY,
         JSON.stringify({
@@ -150,9 +115,12 @@ describe("DriveSocket", () => {
       );
 
       const socket = createSocket();
-      await socket.connect({ interactive: false });
+      await socket.connect();
 
-      expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(false);
+      const raw = localStorageMock.storage.get(TOKEN_KEY);
+      expect(raw).toBeTruthy();
+      const parsed = JSON.parse(raw!) as { accessToken: string };
+      expect(parsed.accessToken).toBe("stored-access");
       await expect(
         socket.push(new Blob(["{}"]), {
           mimeType: "application/json",
@@ -166,7 +134,7 @@ describe("DriveSocket", () => {
       clearGoogleOAuthMock();
       installGoogleOAuthMock({
         onTokenRequest: (config) => {
-          if (config?.prompt === "") silentRequestCount += 1;
+          if (config?.prompt === "none") silentRequestCount += 1;
         },
       });
 
@@ -179,12 +147,31 @@ describe("DriveSocket", () => {
       );
 
       const socket = createSocket();
-      await socket.connect({ interactive: false });
+      await socket.connect();
 
       expect(silentRequestCount).toBeGreaterThan(0);
     });
 
-    it("interactive connect uses token client with drive.appdata scope", async () => {
+    it("connect rejects when silent and login both fail", async () => {
+      clearGoogleOAuthMock();
+      installGoogleOAuthMock({ silentFails: true, loginFails: true });
+
+      const socket = createSocket();
+      await expect(socket.connect()).rejects.toBeInstanceOf(
+        NotAuthenticatedError,
+      );
+    });
+
+    it("connect establishes an authenticated session", async () => {
+      addMessagesFolder();
+      const socket = createSocket();
+      await socket.connect();
+
+      socket.onReceive(() => {});
+      expect(() => socket.start()).not.toThrow();
+    });
+
+    it("connect uses token client with drive.appdata scope", async () => {
       let capturedScope = "";
       clearGoogleOAuthMock();
       installGoogleOAuthMock({
@@ -201,15 +188,9 @@ describe("DriveSocket", () => {
       );
     });
 
-    it("persists tokens to localStorage when visibility becomes hidden", async () => {
+    it("persists tokens to localStorage after connect", async () => {
       const socket = createSocket();
       await socket.connect();
-
-      Object.defineProperty(document, "visibilityState", {
-        value: "hidden",
-        configurable: true,
-      });
-      document.dispatchEvent(new Event("visibilitychange"));
 
       const raw = localStorageMock.storage.get(TOKEN_KEY);
       expect(raw).toBeTruthy();
@@ -217,44 +198,18 @@ describe("DriveSocket", () => {
       expect(parsed.accessToken).toBe("test-access-token");
     });
 
-    it("clears localStorage when tab becomes visible again", async () => {
+    it("keeps persisted tokens in localStorage after connect", async () => {
       const socket = createSocket();
       await socket.connect();
 
-      Object.defineProperty(document, "visibilityState", {
-        value: "hidden",
-        configurable: true,
-      });
-      document.dispatchEvent(new Event("visibilitychange"));
       expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(true);
-
-      Object.defineProperty(document, "visibilityState", {
-        value: "visible",
-        configurable: true,
-      });
-      document.dispatchEvent(new Event("visibilitychange"));
-
-      expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(false);
-      await expect(
-        socket.push(new Blob(["{}"]), {
-          mimeType: "application/json",
-          fileName: "still-auth.json",
-        }),
-      ).resolves.toBeDefined();
-    });
-
-    it("keeps localStorage empty while tab stays visible after connect", async () => {
-      const socket = createSocket();
-      await socket.connect();
-
-      expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(false);
       await expect(
         socket.push(new Blob(["{}"]), {
           mimeType: "application/json",
           fileName: "active.json",
         }),
       ).resolves.toBeDefined();
-      expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(false);
+      expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(true);
     });
 
     it("disconnect revokes and clears persisted tokens", async () => {
@@ -293,7 +248,7 @@ describe("DriveSocket", () => {
 
     it("rejects when not authenticated", async () => {
       clearGoogleOAuthMock();
-      installGoogleOAuthMock({ silentFails: true });
+      installGoogleOAuthMock({ silentFails: true, loginFails: true });
 
       const socket = createSocket({ pollIntervalInMs: 50_000 });
 
@@ -320,7 +275,9 @@ describe("DriveSocket", () => {
           method === "POST" && url.includes("uploadType=multipart"),
       );
       expect(uploadRequest?.url).toBeDefined();
-      const uploaded = [...drive.files.values()].find((f) => f.name === "hello.json");
+      const uploaded = [...drive.files.values()].find(
+        (f) => f.name === "hello.json",
+      );
       expect(uploaded?.parentId).toBe(folder.id);
     });
 
@@ -344,7 +301,11 @@ describe("DriveSocket", () => {
     it("returns uploaded message with fileBlob", async () => {
       const socket = createSocket();
       await socket.connect();
-      drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
+      drive.addFolder({
+        id: "folder-1",
+        name: "messages",
+        parentId: "appDataFolder",
+      });
 
       const fileBlob = new Blob(["{}"]);
       const message = await socket.push(fileBlob, {
@@ -465,7 +426,9 @@ describe("DriveSocket", () => {
 
       const pollListRequests = drive.requests
         .slice(requestCountBefore)
-        .filter(({ method, url }) => method === "GET" && url.includes("/files?"));
+        .filter(
+          ({ method, url }) => method === "GET" && url.includes("/files?"),
+        );
       expect(pollListRequests.length).toBeLessThanOrEqual(2);
     });
 
@@ -496,10 +459,13 @@ describe("DriveSocket", () => {
       await new Promise((resolve) => setTimeout(resolve, 350));
 
       const latestBatch = batches.at(-1);
-      expect(latestBatch?.map((message) => message.id)).toEqual(["newer", "older"]);
-      expect(latestBatch?.every((message) => message.fileBlob instanceof Blob)).toBe(
-        true,
-      );
+      expect(latestBatch?.map((message) => message.id)).toEqual([
+        "newer",
+        "older",
+      ]);
+      expect(
+        latestBatch?.every((message) => message.fileBlob instanceof Blob),
+      ).toBe(true);
     });
 
     it("includes failed downloads as error messages in the batch", async () => {
@@ -531,7 +497,9 @@ describe("DriveSocket", () => {
 
       const latestBatch = batches.at(-1);
       expect(latestBatch?.map((message) => message.id)).toEqual(["ok", "bad"]);
-      expect(latestBatch?.find((message) => message.id === "ok")?.isError).toBeUndefined();
+      expect(
+        latestBatch?.find((message) => message.id === "ok")?.isError,
+      ).toBeUndefined();
       expect(latestBatch?.find((message) => message.id === "bad")).toEqual({
         id: "bad",
         name: "bad.json",
@@ -546,13 +514,17 @@ describe("DriveSocket", () => {
       installGoogleOAuthMock({
         expiresIn: 61,
         onTokenRequest: (config) => {
-          if (config?.prompt === "") silentRequestCount += 1;
+          if (config?.prompt === "none") silentRequestCount += 1;
         },
       });
 
       const socket = createSocket({ pollIntervalInMs: 100 });
       await socket.connect();
-      drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
+      drive.addFolder({
+        id: "folder-1",
+        name: "messages",
+        parentId: "appDataFolder",
+      });
 
       await new Promise((resolve) => setTimeout(resolve, 1_100));
 
@@ -569,7 +541,11 @@ describe("DriveSocket", () => {
     it("stops polling after disconnect", async () => {
       const socket = createSocket({ pollIntervalInMs: 50 });
       await socket.connect();
-      drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
+      drive.addFolder({
+        id: "folder-1",
+        name: "messages",
+        parentId: "appDataFolder",
+      });
 
       const batches: DriveMessage[][] = [];
       socket.onReceive((messages) => batches.push(messages));
@@ -589,7 +565,11 @@ describe("DriveSocket", () => {
 
       const socket = createSocket({ pollIntervalInMs });
       await socket.connect();
-      drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
+      drive.addFolder({
+        id: "folder-1",
+        name: "messages",
+        parentId: "appDataFolder",
+      });
 
       const callbackTimes: number[] = [];
       socket.onReceive(() => callbackTimes.push(Date.now()));
@@ -638,7 +618,11 @@ describe("DriveSocket", () => {
 
       const socket = createSocket({ pollIntervalInMs });
       await socket.connect();
-      drive.addFolder({ id: "folder-1", name: "messages", parentId: "appDataFolder" });
+      drive.addFolder({
+        id: "folder-1",
+        name: "messages",
+        parentId: "appDataFolder",
+      });
 
       socket.onReceive(() => {
         receiveCount += 1;
@@ -688,9 +672,9 @@ describe("DriveSocket", () => {
 
       expect(drive.files.has("keep")).toBe(true);
       expect(drive.files.has("drop")).toBe(true);
-      expect(
-        drive.requests.some(({ method }) => method === "DELETE"),
-      ).toBe(false);
+      expect(drive.requests.some(({ method }) => method === "DELETE")).toBe(
+        false,
+      );
     });
   });
 
@@ -719,7 +703,7 @@ describe("DriveSocket", () => {
 
     it("rejects when not authenticated", async () => {
       clearGoogleOAuthMock();
-      installGoogleOAuthMock({ silentFails: true });
+      installGoogleOAuthMock({ silentFails: true, loginFails: true });
 
       const socket = createSocket({ pollIntervalInMs: 50_000 });
 

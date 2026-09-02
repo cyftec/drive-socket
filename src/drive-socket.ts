@@ -24,6 +24,8 @@ export interface DriveSocketConfig {
   maxFiles: number;
 }
 
+const DRIVE_APPDATA_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+
 function tokenStorageKey(clientId: string, folderName: string): string {
   return `drive-socket:tokens:${clientId}:${folderName}`;
 }
@@ -61,14 +63,13 @@ export class DriveSocket {
     this.oauth = new GoogleOAuth(
       config.clientId,
       tokenStorageKey(config.clientId, config.folderName),
+      DRIVE_APPDATA_SCOPE,
     );
     this.gDriveClient = new GoogleDriveClient(this.oauth);
-
-    this.connect({ interactive: false }).catch(() => {});
   }
 
-  async connect(options?: { interactive?: boolean }): Promise<void> {
-    await this.oauth.connect(options);
+  async connect(): Promise<void> {
+    await this.oauth.connect();
     await this.ensureFolderId();
   }
 
@@ -193,7 +194,7 @@ export class DriveSocket {
       if (!this.folderId || !this.onReceiveCallback) break;
 
       try {
-        await this.oauth.ensureAccessToken();
+        await this.oauth.ensureUserIsLoggedIn();
       } catch {
         await sleep(this.config.pollIntervalInMs);
         continue;
@@ -215,7 +216,7 @@ export class DriveSocket {
 
   private async pruneToMaxFiles(): Promise<void> {
     try {
-      await this.oauth.ensureAccessToken();
+      await this.oauth.ensureUserIsLoggedIn();
     } catch {
       return;
     }

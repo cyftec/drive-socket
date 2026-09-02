@@ -56,7 +56,7 @@ export class GoogleDriveClient {
     init?: RequestInit,
     base = DRIVE_API,
   ): Promise<Response> {
-    await this.oauth.ensureAccessToken();
+    await this.oauth.ensureUserIsLoggedIn();
     const response = await this.oauth.authorizedFetch(`${base}${path}`, init);
     if (!response.ok) throw await this.parseDriveError(response);
     return response;

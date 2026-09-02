@@ -21,53 +21,67 @@ export class GoogleOAuth {
   constructor(
     private readonly clientId: string,
     private readonly storageKey: string,
-  ) {
-    if (typeof window !== "undefined" && typeof document !== "undefined") {
-      window.addEventListener("pagehide", () => this.onTabHidden());
-      window.addEventListener("beforeunload", () => this.onTabHidden());
-      window.addEventListener("focus", () => this.onTabVisible());
-      window.addEventListener("pageshow", () => {
-        if (document.visibilityState === "visible") this.onTabVisible();
-      });
-      document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "hidden") {
-          this.onTabHidden();
-        } else {
-          this.onTabVisible();
-        }
-      });
+    private readonly tokenScopes: string,
+  ) {}
 
-      if (document.visibilityState === "visible") {
-        this.onTabVisible();
+  async connect(): Promise<void> {
+    await this.ensureUserIsLoggedIn();
+  }
+
+  private loadTokensFromStorage(): void {
+    const raw = localStorage.getItem(this.storageKey);
+    const parsed = JSON.parse(raw || "{}") as StoredTokens;
+    if (!parsed.accessToken || !parsed.expiresAt) return;
+
+    this.accessToken = parsed.accessToken;
+    this.expiresAt = parsed.expiresAt;
+  }
+
+  private loadedTokensAreValid(): boolean {
+    return (
+      this.accessToken !== null &&
+      this.expiresAt !== null &&
+      this.expiresAt > Date.now() + TOKEN_EXPIRY_SKEW_MS
+    );
+  }
+
+  private updateTokensInStorage(): void {
+    if (!this.accessToken || this.expiresAt === null) {
+      throw new Error("Error while saving tokens to local storage");
+    }
+
+    const payload: StoredTokens = {
+      accessToken: this.accessToken,
+      expiresAt: this.expiresAt,
+    };
+    localStorage.setItem(this.storageKey, JSON.stringify(payload));
+  }
+
+  async ensureUserIsLoggedIn(): Promise<void> {
+    if (this.loadedTokensAreValid()) return;
+    this.loadTokensFromStorage();
+
+    if (!this.loadedTokensAreValid()) {
+      try {
+        await this.acquireAccessToken({ prompt: "none" });
+        if (this.loadedTokensAreValid()) return;
+      } catch {
+        // fall through to interactive sign-in
       }
+
+      try {
+        await this.acquireAccessToken({ prompt: "login" });
+      } catch {
+        // login failed or was dismissed
+      }
+
+      if (!this.loadedTokensAreValid()) throw new NotAuthenticatedError();
+      this.updateTokensInStorage();
     }
-  }
-
-  private hasValidAccessToken(): boolean {
-    if (!this.accessToken || this.expiresAt === null) return false;
-    return this.expiresAt > Date.now() + TOKEN_EXPIRY_SKEW_MS;
-  }
-
-  async ensureAccessToken(options?: { interactive?: boolean }): Promise<void> {
-    if (this.hasValidAccessToken()) return;
-
-    const interactive = options?.interactive ?? false;
-
-    try {
-      await this.acquireAccessToken({ interactive: false });
-      if (this.hasValidAccessToken()) return;
-    } catch {
-      // fall through to interactive or fail
-    }
-
-    if (!interactive) throw new NotAuthenticatedError();
-
-    await this.acquireAccessToken({ interactive: true });
-    if (!this.hasValidAccessToken()) throw new NotAuthenticatedError();
   }
 
   async authorizedFetch(url: string, init?: RequestInit): Promise<Response> {
-    if (!this.hasValidAccessToken()) throw new NotAuthenticatedError();
+    await this.ensureUserIsLoggedIn();
     return fetch(url, {
       ...init,
       headers: {
@@ -75,24 +89,6 @@ export class GoogleOAuth {
         ...init?.headers,
       },
     });
-  }
-
-  async connect(options?: { interactive?: boolean }): Promise<void> {
-    const interactive = options?.interactive ?? true;
-
-    this.loadFromLocalStorage();
-    if (this.hasValidAccessToken()) return;
-
-    if (interactive) {
-      await this.ensureAccessToken({ interactive: true });
-      return;
-    }
-
-    try {
-      await this.ensureAccessToken({ interactive: false });
-    } catch {
-      // silent connect stops when tokens cannot be restored
-    }
   }
 
   async disconnect(): Promise<void> {
@@ -103,86 +99,18 @@ export class GoogleOAuth {
         google.accounts.oauth2.revoke(token, () => resolve());
       });
     }
-    this.clearTokens();
-    this.removeFromLocalStorage();
-  }
-
-  private onTabVisible(): void {
-    if (!this.hasValidAccessToken()) {
-      this.loadFromLocalStorage();
-    }
-    this.removeFromLocalStorage();
-  }
-
-  private onTabHidden(): void {
-    this.persistToLocalStorage();
-  }
-
-  private loadFromLocalStorage(): void {
-    if (typeof localStorage === "undefined") return;
-
-    const raw = localStorage.getItem(this.storageKey);
-    localStorage.removeItem(this.storageKey);
-    if (!raw) return;
-
-    try {
-      const parsed = JSON.parse(raw) as StoredTokens;
-      if (parsed.accessToken && parsed.expiresAt !== undefined) {
-        this.accessToken = parsed.accessToken;
-        this.expiresAt = parsed.expiresAt;
-      }
-    } catch {
-      // ignore corrupt storage
-    }
-  }
-
-  private persistToLocalStorage(): void {
-    if (typeof localStorage === "undefined") return;
-    if (!this.accessToken || this.expiresAt === null) {
-      this.removeFromLocalStorage();
-      return;
-    }
-
-    const payload: StoredTokens = {
-      accessToken: this.accessToken,
-      expiresAt: this.expiresAt,
-    };
-    localStorage.setItem(this.storageKey, JSON.stringify(payload));
-  }
-
-  private removeFromLocalStorage(): void {
-    if (typeof localStorage === "undefined") return;
-    localStorage.removeItem(this.storageKey);
-  }
-
-  private clearTokens(): void {
     this.accessToken = null;
     this.expiresAt = null;
-  }
-
-  private applyTokenResponse(
-    response: google.accounts.oauth2.TokenResponse,
-  ): void {
-    if (!response.access_token) {
-      throw new Error(
-        response.error_description ??
-          response.error ??
-          "OAuth token response missing access_token",
-      );
-    }
-    this.accessToken = response.access_token;
-    this.expiresAt = Date.now() + (response.expires_in ?? 3600) * 1000;
-    this.removeFromLocalStorage();
+    localStorage.removeItem(this.storageKey);
   }
 
   private async ensureTokenClient(): Promise<google.accounts.oauth2.TokenClient> {
     if (this.tokenClient) return this.tokenClient;
 
     await loadGsiScript();
-    const DRIVE_APPDATA_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
     this.tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: this.clientId,
-      scope: DRIVE_APPDATA_SCOPE,
+      scope: this.tokenScopes,
       callback: (response) => {
         const pending = this.tokenRequest;
         this.tokenRequest = null;
@@ -198,7 +126,9 @@ export class GoogleOAuth {
         }
 
         try {
-          this.applyTokenResponse(response);
+          this.accessToken = response.access_token;
+          this.expiresAt = Date.now() + (response.expires_in ?? 3600) * 1000;
+          this.updateTokensInStorage();
           pending.resolve();
         } catch (error) {
           pending.reject(
@@ -210,7 +140,9 @@ export class GoogleOAuth {
     return this.tokenClient;
   }
 
-  private acquireAccessToken(options: { interactive: boolean }): Promise<void> {
+  private acquireAccessToken(options: {
+    prompt: "none" | "login";
+  }): Promise<void> {
     if (this.acquireInFlight) return this.acquireInFlight;
 
     this.acquireInFlight = this.requestAccessToken(options).finally(() => {
@@ -220,14 +152,14 @@ export class GoogleOAuth {
   }
 
   private async requestAccessToken(options: {
-    interactive: boolean;
+    prompt: "none" | "login";
   }): Promise<void> {
     const client = await this.ensureTokenClient();
 
     return new Promise<void>((resolve, reject) => {
       this.tokenRequest = { resolve, reject };
       client.requestAccessToken(
-        options.interactive ? undefined : { prompt: "" },
+        options.prompt === "none" ? { prompt: "none" } : undefined,
       );
     });
   }

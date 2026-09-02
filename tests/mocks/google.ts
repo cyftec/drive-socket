@@ -16,6 +16,7 @@ export function installGoogleOAuthMock(options?: {
   onTokenInit?: (config: TokenClientConfig) => void;
   onTokenRequest?: (config?: TokenRequestConfig) => void;
   silentFails?: boolean;
+  loginFails?: boolean;
   expiresIn?: number;
 }): void {
   (globalThis as Record<string, unknown>).google = {
@@ -26,8 +27,12 @@ export function installGoogleOAuthMock(options?: {
           return {
             requestAccessToken: (overrideConfig?: TokenRequestConfig) => {
               options?.onTokenRequest?.(overrideConfig);
-              if (!overrideConfig?.prompt && options?.silentFails) {
+              if (overrideConfig?.prompt === "none" && options?.silentFails) {
                 config.callback({ error: "interaction_required" });
+                return;
+              }
+              if (overrideConfig?.prompt !== "none" && options?.loginFails) {
+                config.callback({ error: "access_denied" });
                 return;
               }
               config.callback({
