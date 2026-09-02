@@ -33,6 +33,8 @@ export const getOAuthSingleton = (function () {
       this.googleOAuthTokenScopes = config.googleOAuthTokenScopes;
     }
 
+    // handy method to ensure logged-in state in advance, otherwise
+    // logged-in state is anyways ensured in every this.authorizedFetch call
     async authenticate(): Promise<void> {
       await this.ensureUserIsLoggedIn();
     }
