@@ -192,14 +192,6 @@ export class DriveSocket {
   private async runPollLoop(): Promise<void> {
     while (this.pollLoopRunning) {
       if (!this.folderId || !this.onReceiveCallback) break;
-
-      try {
-        await this.oauth.ensureUserIsLoggedIn();
-      } catch {
-        await sleep(this.config.pollIntervalInMs);
-        continue;
-      }
-
       try {
         const messages = await this.downloadFolderMessages(this.folderId);
 
@@ -215,12 +207,6 @@ export class DriveSocket {
   }
 
   private async pruneToMaxFiles(): Promise<void> {
-    try {
-      await this.oauth.ensureUserIsLoggedIn();
-    } catch {
-      return;
-    }
-
     const folderId = await this.ensureFolderId();
     const files = this.sortFilesByCreatedTimeDesc(
       await this.gDriveClient.listAllFiles(folderFilesQuery(folderId)),
