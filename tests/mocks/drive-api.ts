@@ -1,4 +1,4 @@
-import type { DriveMessage } from "../../src/types/index.ts";
+import type { DriveMessage } from "../../src/drive-socket.ts";
 
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3";
