@@ -1,5 +1,5 @@
 import { DriveApiError } from "../errors/drive-api-error.ts";
-import type { GoogleOAuth } from "./oauth/index.ts";
+import type { GoogleOAuth } from "./oauth.ts";
 import {
   DRIVE_API,
   DRIVE_UPLOAD,

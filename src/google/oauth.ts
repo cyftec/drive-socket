@@ -1,4 +1,4 @@
-import { NotAuthenticatedError } from "../../errors/not-authenticated-error.ts";
+import { NotAuthenticatedError } from "../errors/not-authenticated-error.ts";
 
 interface StoredTokens {
   accessToken: string;
