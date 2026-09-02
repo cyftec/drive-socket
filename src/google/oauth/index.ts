@@ -1,14 +1,12 @@
-import { NotAuthenticatedError } from "../errors/not-authenticated-error.ts";
-import { loadGsiScript } from "./gsi-script-loader.ts";
+import { NotAuthenticatedError } from "../../errors/not-authenticated-error.ts";
 
 interface StoredTokens {
   accessToken: string;
   expiresAt: number;
 }
 
-const TOKEN_EXPIRY_SKEW_MS = 60_000;
-
 export class GoogleOAuth {
+  private static gsiScriptLoadPromise: Promise<void> | null = null;
   private accessToken: string | null = null;
   private expiresAt: number | null = null;
   private tokenClient: google.accounts.oauth2.TokenClient | null = null;
@@ -19,9 +17,9 @@ export class GoogleOAuth {
   private acquireInFlight: Promise<void> | null = null;
 
   constructor(
-    private readonly clientId: string,
-    private readonly storageKey: string,
-    private readonly tokenScopes: string,
+    private readonly googleApiClientId: string,
+    private readonly tokenStorageKey: string,
+    private readonly googleOAuthTokenScopes: string,
   ) {}
 
   async connect(): Promise<void> {
@@ -29,7 +27,7 @@ export class GoogleOAuth {
   }
 
   private loadTokensFromStorage(): void {
-    const raw = localStorage.getItem(this.storageKey);
+    const raw = localStorage.getItem(this.tokenStorageKey);
     const parsed = JSON.parse(raw || "{}") as StoredTokens;
     if (!parsed.accessToken || !parsed.expiresAt) return;
 
@@ -38,10 +36,11 @@ export class GoogleOAuth {
   }
 
   private loadedTokensAreValid(): boolean {
+    const tokenExpirySkewInMs = 60_000;
     return (
       this.accessToken !== null &&
       this.expiresAt !== null &&
-      this.expiresAt > Date.now() + TOKEN_EXPIRY_SKEW_MS
+      this.expiresAt > Date.now() + tokenExpirySkewInMs
     );
   }
 
@@ -54,7 +53,7 @@ export class GoogleOAuth {
       accessToken: this.accessToken,
       expiresAt: this.expiresAt,
     };
-    localStorage.setItem(this.storageKey, JSON.stringify(payload));
+    localStorage.setItem(this.tokenStorageKey, JSON.stringify(payload));
   }
 
   async ensureUserIsLoggedIn(): Promise<void> {
@@ -94,23 +93,44 @@ export class GoogleOAuth {
   async disconnect(): Promise<void> {
     const token = this.accessToken;
     if (token) {
-      await loadGsiScript();
+      await this.ensureGsiScriptLoaded();
       await new Promise<void>((resolve) => {
         google.accounts.oauth2.revoke(token, () => resolve());
       });
     }
     this.accessToken = null;
     this.expiresAt = null;
-    localStorage.removeItem(this.storageKey);
+    localStorage.removeItem(this.tokenStorageKey);
+  }
+
+  private ensureGsiScriptLoaded(): Promise<void> {
+    if (typeof google !== "undefined" && google.accounts?.oauth2) {
+      return Promise.resolve();
+    }
+    if (!GoogleOAuth.gsiScriptLoadPromise) {
+      const gsiClientUrl = "https://accounts.google.com/gsi/client";
+      GoogleOAuth.gsiScriptLoadPromise = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = gsiClientUrl;
+        script.async = true;
+        script.onload = () => resolve();
+        script.onerror = () =>
+          reject(
+            new Error(`Failed to load Google Sign-In script: ${gsiClientUrl}`),
+          );
+        document.head.appendChild(script);
+      });
+    }
+    return GoogleOAuth.gsiScriptLoadPromise;
   }
 
   private async ensureTokenClient(): Promise<google.accounts.oauth2.TokenClient> {
     if (this.tokenClient) return this.tokenClient;
 
-    await loadGsiScript();
+    await this.ensureGsiScriptLoaded();
     this.tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: this.clientId,
-      scope: this.tokenScopes,
+      client_id: this.googleApiClientId,
+      scope: this.googleOAuthTokenScopes,
       callback: (response) => {
         const pending = this.tokenRequest;
         this.tokenRequest = null;
