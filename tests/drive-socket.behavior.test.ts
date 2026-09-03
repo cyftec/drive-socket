@@ -112,7 +112,8 @@ describe("DriveSocket", () => {
         rootPath: DEFAULT_ROOT_PATH,
       });
 
-      await socket.push(new Blob(["{}"]), {
+      await socket.push({
+        fileBlob: new Blob(["{}"]),
         mimeType: "application/json",
         fileName: "tenant.json",
       });
@@ -136,7 +137,8 @@ describe("DriveSocket", () => {
       );
       openSockets.push(socket);
 
-      await socket.push(new Blob(["{}"]), {
+      await socket.push({
+        fileBlob: new Blob(["{}"]),
         mimeType: "application/json",
         fileName: "sync.json",
       });
@@ -171,7 +173,8 @@ describe("DriveSocket", () => {
       expect(raw).toBeTruthy();
       expect(JSON.parse(raw!).accessToken).toBe("stored-access");
       await expect(
-        socket.push(new Blob(["{}"]), {
+        socket.push({
+          fileBlob: new Blob(["{}"]),
           mimeType: "application/json",
           fileName: "a.json",
         }),
@@ -253,7 +256,8 @@ describe("DriveSocket", () => {
 
       expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(true);
       await expect(
-        socket.push(new Blob(["{}"]), {
+        socket.push({
+          fileBlob: new Blob(["{}"]),
           mimeType: "application/json",
           fileName: "active.json",
         }),
@@ -276,7 +280,8 @@ describe("DriveSocket", () => {
       const socket = await connectSocket();
 
       await expect(
-        socket.push(new Blob(["x"]), {
+        socket.push({
+          fileBlob: new Blob(["x"]),
           mimeType: "text/html",
           fileName: "x.html",
         }),
@@ -287,7 +292,8 @@ describe("DriveSocket", () => {
       const socket = await connectSocket();
 
       await expect(
-        socket.push(new Blob(["{}"]), {
+        socket.push({
+          fileBlob: new Blob(["{}"]),
           mimeType: "application/json",
           fileName: "wrong.txt",
         }),
@@ -310,7 +316,8 @@ describe("DriveSocket", () => {
       const rootFolder = seedRootPath();
       const socket = await connectSocket();
 
-      await socket.push(new Blob(['{"hello":"world"}']), {
+      await socket.push({
+        fileBlob: new Blob(['{"hello":"world"}']),
         mimeType: "application/json",
         fileName: "hello.json",
       });
@@ -334,7 +341,8 @@ describe("DriveSocket", () => {
       const socket = await connectSocket();
 
       await expect(
-        socket.push(new Blob(["{}"]), {
+        socket.push({
+          fileBlob: new Blob(["{}"]),
           mimeType: "application/json",
           fileName: "dup.json",
         }),
@@ -345,7 +353,8 @@ describe("DriveSocket", () => {
       const socket = await connectSocket();
 
       const fileBlob = new Blob(["{}"]);
-      const message = await socket.push(fileBlob, {
+      const message = await socket.push({
+        fileBlob,
         mimeType: "application/json",
         fileName: "meta.json",
       });
@@ -353,6 +362,9 @@ describe("DriveSocket", () => {
       expect(message.fileBlob).toBe(fileBlob);
       expect(message.name).toBe("meta.json");
       expect(message.id).toBeTruthy();
+      expect(message.createdTime).toBeTruthy();
+      expect(message.mimeType).toBe("application/json");
+      expect(message.isError).toBe(false);
     });
   });
 
@@ -519,10 +531,12 @@ describe("DriveSocket", () => {
       expect(latestBatch?.map((message) => message.id)).toEqual(["ok", "bad"]);
       expect(
         latestBatch?.find((message) => message.id === "ok")?.isError,
-      ).toBeUndefined();
+      ).toBe(false);
       expect(latestBatch?.find((message) => message.id === "bad")).toEqual({
         id: "bad",
         name: "bad.json",
+        createdTime: "2026-01-01T00:00:00.000Z",
+        mimeType: "application/json",
         fileBlob: expect.any(Blob),
         isError: true,
       });
@@ -717,7 +731,8 @@ describe("DriveSocket", () => {
 
       const socket = await connectSocket({ maxFiles: 1, pollIntervalInMs: 50_000 });
 
-      await socket.push(new Blob(["{}"]), {
+      await socket.push({
+        fileBlob: new Blob(["{}"]),
         mimeType: "application/json",
         fileName: "trigger.json",
       });
@@ -740,7 +755,8 @@ describe("DriveSocket", () => {
 
       const socket = await connectSocket({ maxFiles: 1, pollIntervalInMs: 50_000 });
 
-      await socket.push(new Blob(["{}"]), {
+      await socket.push({
+        fileBlob: new Blob(["{}"]),
         mimeType: "application/json",
         fileName: "newer.json",
       });

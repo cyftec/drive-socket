@@ -49,7 +49,8 @@ const fileBlob = new Blob([JSON.stringify({ hello: "world" })], {
   type: "application/json",
 });
 
-await socket.push(fileBlob, {
+await socket.push({
+  fileBlob,
   mimeType: "application/json",
   fileName: "hello.json",
 });
@@ -75,7 +76,7 @@ Sign-in uses the GIS token model (no backend `client_secret` required). After th
 |--------|-------------|
 | `DriveSocket.connect(config, oauth)` | Authenticate via `oauth`, resolve `rootPath`, return a connected socket |
 | `disconnect()` | Stop polling and mark the socket inactive |
-| `push(fileBlob, { mimeType, fileName })` | Upload immutable message; returns immediately while prune runs in the background |
+| `push(payload)` | Upload immutable message; returns saved `DriveMessage` while prune runs in the background |
 | `onReceive(callback)` | Poll on `pollIntervalInMs`; download and emit all folder files each cycle |
 
 ### `onReceive` poll cycle
@@ -98,13 +99,26 @@ If a cycle is still running when `pollIntervalInMs` would elapse, the timer is h
 | `pollIntervalInMs` | Poll cycle length in milliseconds |
 | `maxFiles` | Maximum files kept in folder (oldest pruned in the background after each `push`) |
 
+### `NewMessagePayload`
+
+| Property | Description |
+|----------|-------------|
+| `fileBlob` | File contents to upload |
+| `mimeType` | Google-supported MIME type |
+| `fileName` | Destination file name in the folder |
+
 ### `DriveMessage`
+
+Saved message returned from `push` and `onReceive`. Extends `DriveFileEntry`.
 
 | Property | Description |
 |----------|-------------|
 | `id` | Google Drive file ID |
 | `name` | File name in the folder |
+| `createdTime` | Drive file creation timestamp |
+| `mimeType` | File MIME type |
 | `fileBlob` | Downloaded file contents |
+| `isError` | `true` when a polled file could not be downloaded |
 
 ## MIME types
 

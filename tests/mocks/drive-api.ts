@@ -187,7 +187,12 @@ export class DriveApiFixture {
           parentId,
         };
         this.files.set(id, file);
-        return jsonResponse({ id, name });
+        return jsonResponse({
+          id,
+          name,
+          createdTime: file.createdTime,
+          mimeType: file.mimeType,
+        });
       }
 
       if (!url.startsWith(DRIVE_API)) {

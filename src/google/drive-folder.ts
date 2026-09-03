@@ -11,7 +11,7 @@ export interface GoogleDriveFolderConfig {
   rootFolderPath: string;
 }
 
-type DriveFileEntry = {
+export type DriveFileEntry = {
   id: string;
   name: string;
   createdTime: string;
@@ -49,9 +49,7 @@ function assertSpaceScope(config: GoogleDriveFolderConfig): void {
     config.oauth.getConfiguredScopes().split(/\s+/).filter(Boolean),
   );
   const requiredScopes = SPACE_SCOPES[config.space];
-  const hasScope = requiredScopes.some((scope) =>
-    configuredScopes.has(scope),
-  );
+  const hasScope = requiredScopes.some((scope) => configuredScopes.has(scope));
   if (!hasScope) {
     throw new DriveScopeError(config.space, requiredScopes);
   }
@@ -252,13 +250,13 @@ export class GoogleDriveFolder {
     relativePath: string,
     fileBlob: Blob,
     mimeType: string,
-  ): Promise<Pick<DriveFileEntry, "id" | "name">> {
+  ): Promise<DriveFileEntry> {
     const { parentFolderId, name } = await this.splitPath(relativePath, true);
     const body = this.encodeMultipart(name, parentFolderId, mimeType, fileBlob);
     const response = await driveRequest(
       this.ctx.oauth,
       UPLOAD_OPERATION_ENDPOINT,
-      "/files?uploadType=multipart&fields=id,name",
+      "/files?uploadType=multipart&fields=id,name,createdTime,mimeType",
       { method: "POST", body },
     );
     return await response.json();

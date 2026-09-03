@@ -7,15 +7,22 @@ import {
   GoogleDriveFolder,
   mimeToExtension,
   supportedMimeType,
+  type DriveFileEntry,
   type DriveSpace,
   type GoogleOAuth,
 } from "./google";
 
-export interface DriveMessage {
-  id: string;
-  name: string;
+/** New message payload sent by the caller for upload. */
+export type NewMessagePayload = {
   fileBlob: Blob;
-  isError?: boolean;
+  mimeType: string;
+  fileName: string;
+};
+
+/** Message persisted in Drive and returned from push / onReceive. */
+export interface DriveMessage extends DriveFileEntry {
+  fileBlob: Blob;
+  isError: boolean;
 }
 
 export type DriveSocketClientType = "single-tenant" | "multi-tenant";
@@ -99,11 +106,8 @@ export class DriveSocket {
     }
   }
 
-  async push(
-    fileBlob: Blob,
-    options: { mimeType: string; fileName: string },
-  ): Promise<DriveMessage> {
-    const { mimeType, fileName } = options;
+  async push(payload: NewMessagePayload): Promise<DriveMessage> {
+    const { fileBlob, mimeType, fileName } = payload;
     if (!supportedMimeType(mimeType)) {
       throw new InvalidMimeError(mimeType, "not supported");
     }
@@ -125,7 +129,7 @@ export class DriveSocket {
 
     const saved = await this.folder.write(fileName, fileBlob, mimeType);
     this.pruneToMaxFiles().catch(() => {});
-    return { ...saved, fileBlob };
+    return { ...saved, fileBlob, isError: false };
   }
 
   async delete(messageId: string): Promise<void> {
@@ -177,11 +181,10 @@ export class DriveSocket {
       files.map(async (file) => {
         try {
           const fileBlob = await this.folder.read(file.name);
-          return { id: file.id, name: file.name, fileBlob };
+          return { ...file, fileBlob, isError: false };
         } catch {
           return {
-            id: file.id,
-            name: file.name,
+            ...file,
             fileBlob: new Blob(),
             isError: true,
           };
