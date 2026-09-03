@@ -1,10 +1,11 @@
-import type { DriveMessage } from "../../src/drive-socket.ts";
-
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3";
 const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 
-type StoredFile = DriveMessage & {
+type StoredFile = {
+  id: string;
+  name: string;
+  fileBlob: Blob;
   createdTime: string;
   mimeType: string;
   parentId: string;

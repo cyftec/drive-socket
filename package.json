@@ -40,8 +40,10 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tests.json",
-    "test": "bun test",
-    "prepublishOnly": "bun run typecheck && bun test"
+    "test:typecheck": "bun typecheck",
+    "test:runtime": "bun test",
+    "tests": "bun run test:runtime && bun run test:typecheck",
+    "prepublishOnly": "bun tests"
   },
   "devDependencies": {
     "@types/bun": "latest",

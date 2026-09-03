@@ -3,22 +3,15 @@ import {
   DriveAmbiguousPathError,
   DriveScopeError,
 } from "../src/errors/index.ts";
-import {
-  GoogleDriveFolder,
-} from "../src/google/drive-folder.ts";
-import type { GoogleOAuth } from "../src/google/oauth.ts";
+import { GoogleDriveFolder } from "../src/google/drive-folder.ts";
 import { DriveApiFixture } from "./mocks/drive-api.ts";
+import {
+  createMockOAuth,
+  DRIVE_APPDATA_SCOPE,
+  DRIVE_FILE_SCOPE,
+} from "./mocks/oauth-harness.ts";
 
-const APPDATA_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
-const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-
-function createMockOAuth(scopes: string): GoogleOAuth {
-  return {
-    getConfiguredScopes: () => scopes,
-    authenticate: async () => {},
-    authorizedFetch: (url, init) => fetch(url, init),
-  } as GoogleOAuth;
-}
+const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 
 describe("GoogleDriveFolder", () => {
   let drive: DriveApiFixture;
@@ -35,11 +28,10 @@ describe("GoogleDriveFolder", () => {
 
   describe("constructor scope validation", () => {
     it("throws DriveScopeError when appDataFolder scope is missing", () => {
-      const oauth = createMockOAuth(DRIVE_FILE_SCOPE);
       expect(
         () =>
           new GoogleDriveFolder({
-            oauth,
+            oauth: createMockOAuth(DRIVE_FILE_SCOPE),
             space: "appDataFolder",
             rootFolderPath: "my-app",
           }),
@@ -47,11 +39,10 @@ describe("GoogleDriveFolder", () => {
     });
 
     it("accepts drive.file scope for drive space", () => {
-      const oauth = createMockOAuth(DRIVE_FILE_SCOPE);
       expect(
         () =>
           new GoogleDriveFolder({
-            oauth,
+            oauth: createMockOAuth(DRIVE_FILE_SCOPE),
             space: "drive",
             rootFolderPath: "my-app",
           }),
@@ -59,11 +50,10 @@ describe("GoogleDriveFolder", () => {
     });
 
     it("throws DriveScopeError when drive space has only appDataFolder scope", () => {
-      const oauth = createMockOAuth(APPDATA_SCOPE);
       expect(
         () =>
           new GoogleDriveFolder({
-            oauth,
+            oauth: createMockOAuth(DRIVE_APPDATA_SCOPE),
             space: "drive",
             rootFolderPath: "my-app",
           }),
@@ -72,7 +62,7 @@ describe("GoogleDriveFolder", () => {
   });
 
   describe("appDataFolder space", () => {
-    const oauth = createMockOAuth(APPDATA_SCOPE);
+    const oauth = createMockOAuth(DRIVE_APPDATA_SCOPE);
 
     it("connect creates nested root when absent", async () => {
       const folder = new GoogleDriveFolder({
@@ -84,7 +74,7 @@ describe("GoogleDriveFolder", () => {
       await folder.connect();
 
       const created = [...drive.files.values()].filter(
-        (file) => file.mimeType === "application/vnd.google-apps.folder",
+        (file) => file.mimeType === FOLDER_MIME_TYPE,
       );
       expect(created.map((file) => file.name).sort()).toEqual([
         "inbox",
@@ -112,8 +102,7 @@ describe("GoogleDriveFolder", () => {
 
       const folders = [...drive.files.values()].filter(
         (file) =>
-          file.mimeType === "application/vnd.google-apps.folder" &&
-          file.name === "my-app",
+          file.mimeType === FOLDER_MIME_TYPE && file.name === "my-app",
       );
       expect(folders).toHaveLength(1);
       expect(folders[0]?.id).toBe(existing.id);
@@ -138,16 +127,8 @@ describe("GoogleDriveFolder", () => {
         name: "my-app",
         parentId: "appDataFolder",
       });
-      drive.addFile({
-        id: "file-1",
-        name: "a.json",
-        parentId: root.id,
-      });
-      drive.addFolder({
-        id: "sub-folder",
-        name: "nested",
-        parentId: root.id,
-      });
+      drive.addFile({ id: "file-1", name: "a.json", parentId: root.id });
+      drive.addFolder({ id: "sub-folder", name: "nested", parentId: root.id });
       drive.addFile({
         id: "file-2",
         name: "deep.json",
@@ -161,14 +142,16 @@ describe("GoogleDriveFolder", () => {
       });
       await folder.connect();
 
-      const files = await folder.files();
-      expect(files.map((file) => file.name)).toEqual(["a.json"]);
-
-      const listRequest = drive.requests.find(
-        (request) =>
-          request.method === "GET" && request.url.includes("spaces=appDataFolder"),
-      );
-      expect(listRequest).toBeDefined();
+      expect((await folder.files()).map((file) => file.name)).toEqual([
+        "a.json",
+      ]);
+      expect(
+        drive.requests.some(
+          (request) =>
+            request.method === "GET" &&
+            request.url.includes("spaces=appDataFolder"),
+        ),
+      ).toBe(true);
     });
 
     it("write, read, exists, and deleteByPath round-trip", async () => {
@@ -185,9 +168,9 @@ describe("GoogleDriveFolder", () => {
       const saved = await folder.write("hello.json", fileBlob, "application/json");
       expect(saved.name).toBe("hello.json");
       expect(await folder.exists("hello.json")).toBe(true);
-
-      const downloaded = await folder.read("hello.json");
-      expect(await downloaded.text()).toBe('{"hello":"world"}');
+      expect(await (await folder.read("hello.json")).text()).toBe(
+        '{"hello":"world"}',
+      );
 
       await folder.deleteByPath("hello.json");
       expect(await folder.exists("hello.json")).toBe(false);
@@ -220,11 +203,11 @@ describe("GoogleDriveFolder", () => {
 
       await folder.mkdir("outbox/pending");
 
-      const folders = [...drive.files.values()].filter(
-        (file) => file.mimeType === "application/vnd.google-apps.folder",
-      );
-      expect(folders.map((file) => file.name).sort()).toContain("outbox");
-      expect(folders.map((file) => file.name).sort()).toContain("pending");
+      const folderNames = [...drive.files.values()]
+        .filter((file) => file.mimeType === FOLDER_MIME_TYPE)
+        .map((file) => file.name);
+      expect(folderNames).toContain("outbox");
+      expect(folderNames).toContain("pending");
     });
 
     it("deleteById issues a single DELETE without list query", async () => {
@@ -303,16 +286,16 @@ describe("GoogleDriveFolder", () => {
         (file) => file.name === "shared-sync",
       );
       expect(created?.parentId).toBe("root");
-
-      const listRequest = drive.requests.find(
-        (request) =>
-          request.method === "GET" && request.url.includes("spaces=drive"),
-      );
-      expect(listRequest).toBeDefined();
+      expect(
+        drive.requests.some(
+          (request) =>
+            request.method === "GET" && request.url.includes("spaces=drive"),
+        ),
+      ).toBe(true);
     });
 
-    it("files and write work in drive space separately from appData", async () => {
-      const appDataRoot = drive.addFolder({
+    it("files and write work in drive space separately from appDataFolder", async () => {
+      const appDataFolderRoot = drive.addFolder({
         id: "appdata-root",
         name: "my-app",
         parentId: "appDataFolder",
@@ -320,7 +303,7 @@ describe("GoogleDriveFolder", () => {
       drive.addFile({
         id: "appdata-file",
         name: "hidden.json",
-        parentId: appDataRoot.id,
+        parentId: appDataFolderRoot.id,
       });
 
       const folder = new GoogleDriveFolder({
