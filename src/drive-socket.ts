@@ -38,35 +38,31 @@ function spaceForClientType(clientType: DriveSocketClientType): DriveSpace {
 export class DriveSocket {
   private readonly folder: GoogleDriveFolder;
 
-  private connected = false;
+  private active = true;
   private pollLoopRunning = false;
   private pollLoopTask: Promise<void> | null = null;
   private onReceiveCallback: ((messages: DriveMessage[]) => void) | null = null;
 
-  constructor(
+  private constructor(
     private readonly config: DriveSocketConfig,
-    oauth: GoogleOAuth,
+    folder: GoogleDriveFolder,
   ) {
-    if (config.pollIntervalInMs <= 0) {
-      throw new RangeError("pollIntervalInMs must be > 0");
-    }
-    if (config.maxFiles < 0) {
-      throw new RangeError("maxFiles must be >= 0");
-    }
-    if (!config.rootPath) {
-      throw new RangeError("rootPath must not be empty");
-    }
+    this.folder = folder;
+  }
 
-    this.folder = new GoogleDriveFolder({
+  static async connect(
+    config: DriveSocketConfig,
+    oauth: GoogleOAuth,
+  ): Promise<DriveSocket> {
+    DriveSocket.validateConfig(config);
+
+    const folder = await GoogleDriveFolder.getFolderHandle({
       oauth,
       space: spaceForClientType(config.clientType),
       rootFolderPath: config.rootPath,
     });
-  }
 
-  async connect(): Promise<void> {
-    await this.folder.connect();
-    this.connected = true;
+    return new DriveSocket(config, folder);
   }
 
   onReceive(callback: (messages: DriveMessage[]) => void): void {
@@ -76,7 +72,7 @@ export class DriveSocket {
   async disconnect(): Promise<void> {
     this.pollLoopRunning = false;
     this.onReceiveCallback = null;
-    this.connected = false;
+    this.active = false;
   }
 
   get isRunning(): boolean {
@@ -88,7 +84,7 @@ export class DriveSocket {
   }
 
   start(): void {
-    this.assertConnected();
+    this.assertActive();
     if (!this.onReceiveCallback) {
       throw new Error(
         "No receive callback registered. Call onReceive() first.",
@@ -122,7 +118,7 @@ export class DriveSocket {
       );
     }
 
-    this.assertConnected();
+    this.assertActive();
     if (await this.folder.exists(fileName)) {
       throw new MessageExistsError(fileName);
     }
@@ -133,13 +129,25 @@ export class DriveSocket {
   }
 
   async delete(messageId: string): Promise<void> {
-    this.assertConnected();
+    this.assertActive();
     await this.folder.deleteById(messageId);
   }
 
-  private assertConnected(): void {
-    if (!this.connected) {
-      throw new Error("Not connected. Call connect() first.");
+  private static validateConfig(config: DriveSocketConfig): void {
+    if (config.pollIntervalInMs <= 0) {
+      throw new RangeError("pollIntervalInMs must be > 0");
+    }
+    if (config.maxFiles < 0) {
+      throw new RangeError("maxFiles must be >= 0");
+    }
+    if (!config.rootPath) {
+      throw new RangeError("rootPath must not be empty");
+    }
+  }
+
+  private assertActive(): void {
+    if (!this.active) {
+      throw new Error("Socket is disconnected.");
     }
   }
 
@@ -184,7 +192,7 @@ export class DriveSocket {
 
   private async runPollLoop(): Promise<void> {
     while (this.pollLoopRunning) {
-      if (!this.connected || !this.onReceiveCallback) break;
+      if (!this.active || !this.onReceiveCallback) break;
       try {
         const messages = await this.downloadFolderMessages();
 

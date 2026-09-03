@@ -27,11 +27,11 @@ export function installGoogleOAuthMock(options?: {
           return {
             requestAccessToken: (overrideConfig?: TokenRequestConfig) => {
               options?.onTokenRequest?.(overrideConfig);
-              if (overrideConfig?.prompt === "none" && options?.silentFails) {
+              if (overrideConfig?.prompt === "" && options?.silentFails) {
                 config.callback({ error: "interaction_required" });
                 return;
               }
-              if (overrideConfig?.prompt !== "none" && options?.loginFails) {
+              if (overrideConfig?.prompt !== "" && options?.loginFails) {
                 config.callback({ error: "access_denied" });
                 return;
               }

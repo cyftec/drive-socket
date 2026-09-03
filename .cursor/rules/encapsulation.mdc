@@ -24,4 +24,4 @@ alwaysApply: true
 ## Shared vs private
 
 - Export only what callers must have at module boundaries (`DriveSocket`, types, boundaries that are genuinely shared).
-- Integration details (`buildQuery`, multipart encoding, sorting, filename generation) stay inside `DriveSocket` or `GoogleDriveClient` until multiple modules truly need them.
+- Integration details (`buildQuery`, multipart encoding, sorting, filename generation) stay inside `DriveSocket` or `GoogleDriveFolder` until multiple modules truly need them.

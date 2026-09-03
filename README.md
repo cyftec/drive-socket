@@ -19,22 +19,30 @@ npm install @cyftec/drive-socket
 
 1. Create a Google Cloud project and OAuth **Web client** credentials.
 2. Add your PWA origin to authorized JavaScript origins.
-3. Pass the client ID and folder settings to `DriveSocket`.
+3. Create a `GoogleOAuth` instance and pass it to `DriveSocket.connect`.
 
 ## Usage
 
 ```typescript
-import { DriveSocket } from "@cyftec/drive-socket";
+import { DriveSocket, getOAuthSingleton } from "@cyftec/drive-socket";
 
-const socket = new DriveSocket({
-  clientId: "YOUR_CLIENT_ID.apps.googleusercontent.com",
-  folderName: "my-app-messages",
-  pollIntervalInMs: 5000,
-  maxFiles: 20,
+const oauth = getOAuthSingleton({
+  googleApiClientId: "YOUR_CLIENT_ID.apps.googleusercontent.com",
+  googleOAuthTokenScopes: "https://www.googleapis.com/auth/drive.appdata",
 });
 
 // First visit: user must click sign-in (OAuth popup)
-await socket.connect();
+await oauth.authenticate();
+
+const socket = await DriveSocket.connect(
+  {
+    clientType: "single-tenant",
+    rootPath: "my-app/messages",
+    pollIntervalInMs: 5000,
+    maxFiles: 20,
+  },
+  oauth,
+);
 
 // Push a JSON message with a user-provided filename
 const fileBlob = new Blob([JSON.stringify({ hello: "world" })], {
@@ -57,7 +65,7 @@ socket.onReceive(async (messages) => {
 await socket.disconnect();
 ```
 
-On page load, `DriveSocket` silently restores tokens from `localStorage` (if present), moves them into memory, and clears storage immediately. While the tab is active, tokens live only in memory — `localStorage` stays empty. Tokens are written to `localStorage` only when the tab is hidden or the browser is closing, so sessions survive restarts without leaving credentials exposed during active use.
+On authenticate, `GoogleOAuth` restores tokens from `localStorage` when present, or requests new ones via GIS (silent renewal first, then interactive sign-in). Acquired tokens are persisted to `localStorage` for session continuity across page reloads.
 
 Sign-in uses the GIS token model (no backend `client_secret` required). After the user approves access once, the library silently requests new access tokens for hours-long sessions.
 
@@ -65,8 +73,8 @@ Sign-in uses the GIS token model (no backend `client_secret` required). After th
 
 | Method | Description |
 |--------|-------------|
-| `connect(options?)` | Restore tokens from `localStorage`, silent GIS token renewal, or interactive OAuth sign-in |
-| `disconnect()` | Revoke token, stop polling, clear persisted tokens |
+| `DriveSocket.connect(config, oauth)` | Authenticate via `oauth`, resolve `rootPath`, return a connected socket |
+| `disconnect()` | Stop polling and mark the socket inactive |
 | `push(fileBlob, { mimeType, fileName })` | Upload immutable message; returns immediately while prune runs in the background |
 | `onReceive(callback)` | Poll on `pollIntervalInMs`; download and emit all folder files each cycle |
 
@@ -85,8 +93,8 @@ If a cycle is still running when `pollIntervalInMs` would elapse, the timer is h
 
 | Property | Description |
 |----------|-------------|
-| `clientId` | Google OAuth Web client ID |
-| `folderName` | Subfolder name inside `appDataFolder` |
+| `clientType` | `"single-tenant"` (`appDataFolder` / `drive.appdata`) or `"multi-tenant"` (`drive` / `drive.file`) |
+| `rootPath` | Folder path under the space (created if missing) |
 | `pollIntervalInMs` | Poll cycle length in milliseconds |
 | `maxFiles` | Maximum files kept in folder (oldest pruned in the background after each `push`) |
 

@@ -47,17 +47,16 @@ describe("DriveSocket", () => {
     });
   }
 
-  function createSocket(
+  async function connectSocket(
     overrides: Partial<DriveSocketConfig> = {},
-  ): DriveSocket {
-    const socket = new DriveSocket(defaultDriveSocketConfig(overrides), oauth);
+  ): Promise<DriveSocket> {
+    await oauth.authenticate();
+    const socket = await DriveSocket.connect(
+      defaultDriveSocketConfig(overrides),
+      oauth,
+    );
     openSockets.push(socket);
     return socket;
-  }
-
-  async function connectSocket(socket: DriveSocket): Promise<void> {
-    await oauth.authenticate();
-    await socket.connect();
   }
 
   beforeEach(() => {
@@ -77,45 +76,41 @@ describe("DriveSocket", () => {
   });
 
   describe("config validation", () => {
-    it("rejects non-positive pollIntervalInMs", () => {
-      expect(
-        () =>
-          new DriveSocket(
-            defaultDriveSocketConfig({ pollIntervalInMs: 0 }),
-            createMockOAuth(DRIVE_APPDATA_SCOPE),
-          ),
-      ).toThrow("pollIntervalInMs must be > 0");
+    it("rejects non-positive pollIntervalInMs", async () => {
+      await expect(
+        DriveSocket.connect(
+          defaultDriveSocketConfig({ pollIntervalInMs: 0 }),
+          createMockOAuth(DRIVE_APPDATA_SCOPE),
+        ),
+      ).rejects.toThrow("pollIntervalInMs must be > 0");
     });
 
-    it("rejects negative maxFiles", () => {
-      expect(
-        () =>
-          new DriveSocket(
-            defaultDriveSocketConfig({ maxFiles: -1 }),
-            createMockOAuth(DRIVE_APPDATA_SCOPE),
-          ),
-      ).toThrow("maxFiles must be >= 0");
+    it("rejects negative maxFiles", async () => {
+      await expect(
+        DriveSocket.connect(
+          defaultDriveSocketConfig({ maxFiles: -1 }),
+          createMockOAuth(DRIVE_APPDATA_SCOPE),
+        ),
+      ).rejects.toThrow("maxFiles must be >= 0");
     });
 
-    it("rejects empty rootPath", () => {
-      expect(
-        () =>
-          new DriveSocket(
-            defaultDriveSocketConfig({ rootPath: "" }),
-            createMockOAuth(DRIVE_APPDATA_SCOPE),
-          ),
-      ).toThrow("rootPath must not be empty");
+    it("rejects empty rootPath", async () => {
+      await expect(
+        DriveSocket.connect(
+          defaultDriveSocketConfig({ rootPath: "" }),
+          createMockOAuth(DRIVE_APPDATA_SCOPE),
+        ),
+      ).rejects.toThrow("rootPath must not be empty");
     });
   });
 
   describe("clientType", () => {
     it("single-tenant uses appDataFolder space", async () => {
       seedRootPath();
-      const socket = createSocket({
+      const socket = await connectSocket({
         clientType: "single-tenant",
         rootPath: DEFAULT_ROOT_PATH,
       });
-      await connectSocket(socket);
 
       await socket.push(new Blob(["{}"]), {
         mimeType: "application/json",
@@ -132,16 +127,14 @@ describe("DriveSocket", () => {
     });
 
     it("multi-tenant uses drive space", async () => {
-      const multiTenantOAuth = createMockOAuth(DRIVE_FILE_SCOPE);
-      const socket = new DriveSocket(
+      const socket = await DriveSocket.connect(
         defaultDriveSocketConfig({
           clientType: "multi-tenant",
           rootPath: "shared-sync",
         }),
-        multiTenantOAuth,
+        createMockOAuth(DRIVE_FILE_SCOPE),
       );
       openSockets.push(socket);
-      await socket.connect();
 
       await socket.push(new Blob(["{}"]), {
         mimeType: "application/json",
@@ -172,8 +165,7 @@ describe("DriveSocket", () => {
         }),
       );
 
-      const socket = createSocket();
-      await connectSocket(socket);
+      const socket = await connectSocket();
 
       const raw = localStorageMock.storage.get(TOKEN_KEY);
       expect(raw).toBeTruthy();
@@ -191,7 +183,7 @@ describe("DriveSocket", () => {
       clearGoogleOAuthMock();
       installGoogleOAuthMock({
         onTokenRequest: (config) => {
-          if (config?.prompt === "none") silentRequestCount += 1;
+          if (config?.prompt === "") silentRequestCount += 1;
         },
       });
 
@@ -219,8 +211,7 @@ describe("DriveSocket", () => {
 
     it("connect resolves rootPath after authenticate", async () => {
       seedRootPath();
-      const socket = createSocket();
-      await connectSocket(socket);
+      const socket = await connectSocket();
 
       socket.onReceive(() => {});
       expect(() => socket.start()).not.toThrow();
@@ -258,8 +249,7 @@ describe("DriveSocket", () => {
     });
 
     it("keeps persisted tokens in localStorage after connect", async () => {
-      const socket = createSocket();
-      await connectSocket(socket);
+      const socket = await connectSocket();
 
       expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(true);
       await expect(
@@ -272,8 +262,7 @@ describe("DriveSocket", () => {
     });
 
     it("disconnect leaves oauth tokens in localStorage", async () => {
-      const socket = createSocket();
-      await connectSocket(socket);
+      const socket = await connectSocket();
       expect(localStorageMock.storage.has(TOKEN_KEY)).toBe(true);
 
       await socket.disconnect();
@@ -284,8 +273,7 @@ describe("DriveSocket", () => {
 
   describe("push", () => {
     it("rejects unsupported mime types", async () => {
-      const socket = createSocket();
-      await connectSocket(socket);
+      const socket = await connectSocket();
 
       await expect(
         socket.push(new Blob(["x"]), {
@@ -296,8 +284,7 @@ describe("DriveSocket", () => {
     });
 
     it("rejects filename extension mismatch", async () => {
-      const socket = createSocket();
-      await connectSocket(socket);
+      const socket = await connectSocket();
 
       await expect(
         socket.push(new Blob(["{}"]), {
@@ -311,17 +298,17 @@ describe("DriveSocket", () => {
       clearGoogleOAuthMock();
       installGoogleOAuthMock({ silentFails: true, loginFails: true });
 
-      const socket = createSocket({ pollIntervalInMs: 50_000 });
-
-      await expect(socket.connect()).rejects.toBeInstanceOf(
-        NotAuthenticatedError,
-      );
+      await expect(
+        DriveSocket.connect(
+          defaultDriveSocketConfig({ pollIntervalInMs: 50_000 }),
+          oauth,
+        ),
+      ).rejects.toBeInstanceOf(NotAuthenticatedError);
     });
 
     it("uploads into configured rootPath", async () => {
       const rootFolder = seedRootPath();
-      const socket = createSocket();
-      await connectSocket(socket);
+      const socket = await connectSocket();
 
       await socket.push(new Blob(['{"hello":"world"}']), {
         mimeType: "application/json",
@@ -344,8 +331,7 @@ describe("DriveSocket", () => {
       const rootFolder = seedRootPath();
       drive.addFile({ name: "dup.json", parentId: rootFolder.id });
 
-      const socket = createSocket();
-      await connectSocket(socket);
+      const socket = await connectSocket();
 
       await expect(
         socket.push(new Blob(["{}"]), {
@@ -356,8 +342,7 @@ describe("DriveSocket", () => {
     });
 
     it("returns uploaded message with fileBlob", async () => {
-      const socket = createSocket();
-      await connectSocket(socket);
+      const socket = await connectSocket();
 
       const fileBlob = new Blob(["{}"]);
       const message = await socket.push(fileBlob, {
@@ -372,22 +357,14 @@ describe("DriveSocket", () => {
   });
 
   describe("onReceive", () => {
-    it("is not running until start is called", () => {
-      expect(createSocket().isRunning).toBe(false);
-    });
-
-    it("rejects start before connect", () => {
-      const socket = createSocket();
-      socket.onReceive(() => {});
-      expect(() => socket.start()).toThrow(
-        "Not connected. Call connect() first.",
-      );
+    it("is not running until start is called", async () => {
+      const socket = await connectSocket();
+      expect(socket.isRunning).toBe(false);
     });
 
     it("rejects start without onReceive", async () => {
       seedRootPath();
-      const socket = createSocket();
-      await connectSocket(socket);
+      const socket = await connectSocket();
       expect(() => socket.start()).toThrow(
         "No receive callback registered. Call onReceive() first.",
       );
@@ -395,25 +372,22 @@ describe("DriveSocket", () => {
 
     it("rejects start after disconnect", async () => {
       seedRootPath();
-      const socket = createSocket();
-      await connectSocket(socket);
+      const socket = await connectSocket();
       socket.onReceive(() => {});
       await socket.disconnect();
-      expect(() => socket.start()).toThrow(
-        "Not connected. Call connect() first.",
-      );
+      expect(() => socket.start()).toThrow("Socket is disconnected.");
     });
 
-    it("does not poll until connected and start is called", async () => {
+    it("does not poll until start is called", async () => {
       seedRootPath();
-      const socket = createSocket({ pollIntervalInMs: 200 });
       const batches: DriveMessage[][] = [];
+
+      const socket = await connectSocket({ pollIntervalInMs: 200 });
       socket.onReceive((messages) => batches.push(messages));
 
       await new Promise((resolve) => setTimeout(resolve, 250));
       expect(batches).toHaveLength(0);
 
-      await connectSocket(socket);
       socket.start();
 
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -423,8 +397,7 @@ describe("DriveSocket", () => {
 
     it("pause stops further poll cycles", async () => {
       seedRootPath();
-      const socket = createSocket({ pollIntervalInMs: 50 });
-      await connectSocket(socket);
+      const socket = await connectSocket({ pollIntervalInMs: 50 });
 
       const batches: DriveMessage[][] = [];
       socket.onReceive((messages) => batches.push(messages));
@@ -443,8 +416,7 @@ describe("DriveSocket", () => {
 
     it("start resumes polling after pause", async () => {
       seedRootPath();
-      const socket = createSocket({ pollIntervalInMs: 50 });
-      await connectSocket(socket);
+      const socket = await connectSocket({ pollIntervalInMs: 50 });
 
       const batches: DriveMessage[][] = [];
       socket.onReceive((messages) => batches.push(messages));
@@ -464,8 +436,7 @@ describe("DriveSocket", () => {
 
     it("does not spawn duplicate poll loops on repeated start", async () => {
       seedRootPath();
-      const socket = createSocket({ pollIntervalInMs: 200 });
-      await connectSocket(socket);
+      const socket = await connectSocket({ pollIntervalInMs: 200 });
       socket.onReceive(() => {});
 
       const requestCountBefore = drive.requests.length;
@@ -500,8 +471,7 @@ describe("DriveSocket", () => {
         fileBlob: new Blob(["newer"]),
       });
 
-      const socket = createSocket({ pollIntervalInMs: 200 });
-      await connectSocket(socket);
+      const socket = await connectSocket({ pollIntervalInMs: 200 });
 
       const batches: DriveMessage[][] = [];
       socket.onReceive((messages) => batches.push(messages));
@@ -537,8 +507,7 @@ describe("DriveSocket", () => {
       });
       drive.failDownloadIds.add("bad");
 
-      const socket = createSocket({ pollIntervalInMs: 200 });
-      await connectSocket(socket);
+      const socket = await connectSocket({ pollIntervalInMs: 200 });
 
       const batches: DriveMessage[][] = [];
       socket.onReceive((messages) => batches.push(messages));
@@ -565,12 +534,11 @@ describe("DriveSocket", () => {
       installGoogleOAuthMock({
         expiresIn: 61,
         onTokenRequest: (config) => {
-          if (config?.prompt === "none") silentRequestCount += 1;
+          if (config?.prompt === "") silentRequestCount += 1;
         },
       });
 
-      const socket = createSocket({ pollIntervalInMs: 100 });
-      await connectSocket(socket);
+      const socket = await connectSocket({ pollIntervalInMs: 100 });
 
       await new Promise((resolve) => setTimeout(resolve, 1_100));
 
@@ -585,8 +553,7 @@ describe("DriveSocket", () => {
     });
 
     it("stops polling after disconnect", async () => {
-      const socket = createSocket({ pollIntervalInMs: 50 });
-      await connectSocket(socket);
+      const socket = await connectSocket({ pollIntervalInMs: 50 });
 
       const batches: DriveMessage[][] = [];
       socket.onReceive((messages) => batches.push(messages));
@@ -604,8 +571,7 @@ describe("DriveSocket", () => {
       const pollIntervalInMs = 80;
       drive.listDelayMs = 120;
 
-      const socket = createSocket({ pollIntervalInMs });
-      await connectSocket(socket);
+      const socket = await connectSocket({ pollIntervalInMs });
 
       const callbackTimes: number[] = [];
       socket.onReceive(() => callbackTimes.push(Date.now()));
@@ -631,8 +597,7 @@ describe("DriveSocket", () => {
         fileBlob: new Blob(["slow"]),
       });
 
-      const socket = createSocket({ pollIntervalInMs });
-      await connectSocket(socket);
+      const socket = await connectSocket({ pollIntervalInMs });
 
       const callbackTimes: number[] = [];
       socket.onReceive(() => callbackTimes.push(Date.now()));
@@ -650,8 +615,7 @@ describe("DriveSocket", () => {
       const pollIntervalInMs = 500;
       let receiveCount = 0;
 
-      const socket = createSocket({ pollIntervalInMs });
-      await connectSocket(socket);
+      const socket = await connectSocket({ pollIntervalInMs });
 
       socket.onReceive(() => {
         receiveCount += 1;
@@ -688,8 +652,7 @@ describe("DriveSocket", () => {
         parentId: rootFolder.id,
       });
 
-      const socket = createSocket({ maxFiles: 1, pollIntervalInMs: 200 });
-      await connectSocket(socket);
+      const socket = await connectSocket({ maxFiles: 1, pollIntervalInMs: 200 });
       socket.onReceive(() => {});
       socket.start();
 
@@ -712,8 +675,7 @@ describe("DriveSocket", () => {
         parentId: rootFolder.id,
       });
 
-      const socket = createSocket();
-      await connectSocket(socket);
+      const socket = await connectSocket();
 
       await socket.delete(file.id);
 
@@ -730,11 +692,12 @@ describe("DriveSocket", () => {
       clearGoogleOAuthMock();
       installGoogleOAuthMock({ silentFails: true, loginFails: true });
 
-      const socket = createSocket({ pollIntervalInMs: 50_000 });
-
-      await expect(socket.connect()).rejects.toBeInstanceOf(
-        NotAuthenticatedError,
-      );
+      await expect(
+        DriveSocket.connect(
+          defaultDriveSocketConfig({ pollIntervalInMs: 50_000 }),
+          oauth,
+        ),
+      ).rejects.toBeInstanceOf(NotAuthenticatedError);
     });
   });
 
@@ -752,8 +715,7 @@ describe("DriveSocket", () => {
         parentId: rootFolder.id,
       });
 
-      const socket = createSocket({ maxFiles: 1, pollIntervalInMs: 50_000 });
-      await connectSocket(socket);
+      const socket = await connectSocket({ maxFiles: 1, pollIntervalInMs: 50_000 });
 
       await socket.push(new Blob(["{}"]), {
         mimeType: "application/json",
@@ -776,8 +738,7 @@ describe("DriveSocket", () => {
         parentId: rootFolder.id,
       });
 
-      const socket = createSocket({ maxFiles: 1, pollIntervalInMs: 50_000 });
-      await connectSocket(socket);
+      const socket = await connectSocket({ maxFiles: 1, pollIntervalInMs: 50_000 });
 
       await socket.push(new Blob(["{}"]), {
         mimeType: "application/json",

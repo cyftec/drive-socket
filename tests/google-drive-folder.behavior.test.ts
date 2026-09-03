@@ -26,52 +26,47 @@ describe("GoogleDriveFolder", () => {
     restoreFetch();
   });
 
-  describe("constructor scope validation", () => {
-    it("throws DriveScopeError when appDataFolder scope is missing", () => {
-      expect(
-        () =>
-          new GoogleDriveFolder({
-            oauth: createMockOAuth(DRIVE_FILE_SCOPE),
-            space: "appDataFolder",
-            rootFolderPath: "my-app",
-          }),
-      ).toThrow(DriveScopeError);
+  describe("getFolderHandle scope validation", () => {
+    it("throws DriveScopeError when appDataFolder scope is missing", async () => {
+      await expect(
+        GoogleDriveFolder.getFolderHandle({
+          oauth: createMockOAuth(DRIVE_FILE_SCOPE),
+          space: "appDataFolder",
+          rootFolderPath: "my-app",
+        }),
+      ).rejects.toThrow(DriveScopeError);
     });
 
-    it("accepts drive.file scope for drive space", () => {
-      expect(
-        () =>
-          new GoogleDriveFolder({
-            oauth: createMockOAuth(DRIVE_FILE_SCOPE),
-            space: "drive",
-            rootFolderPath: "my-app",
-          }),
-      ).not.toThrow();
+    it("accepts drive.file scope for drive space", async () => {
+      await expect(
+        GoogleDriveFolder.getFolderHandle({
+          oauth: createMockOAuth(DRIVE_FILE_SCOPE),
+          space: "drive",
+          rootFolderPath: "my-app",
+        }),
+      ).resolves.toBeInstanceOf(GoogleDriveFolder);
     });
 
-    it("throws DriveScopeError when drive space has only appDataFolder scope", () => {
-      expect(
-        () =>
-          new GoogleDriveFolder({
-            oauth: createMockOAuth(DRIVE_APPDATA_SCOPE),
-            space: "drive",
-            rootFolderPath: "my-app",
-          }),
-      ).toThrow(DriveScopeError);
+    it("throws DriveScopeError when drive space has only appDataFolder scope", async () => {
+      await expect(
+        GoogleDriveFolder.getFolderHandle({
+          oauth: createMockOAuth(DRIVE_APPDATA_SCOPE),
+          space: "drive",
+          rootFolderPath: "my-app",
+        }),
+      ).rejects.toThrow(DriveScopeError);
     });
   });
 
   describe("appDataFolder space", () => {
     const oauth = createMockOAuth(DRIVE_APPDATA_SCOPE);
 
-    it("connect creates nested root when absent", async () => {
-      const folder = new GoogleDriveFolder({
+    it("getFolderHandle creates nested root when absent", async () => {
+      await GoogleDriveFolder.getFolderHandle({
         oauth,
         space: "appDataFolder",
         rootFolderPath: "my-app/inbox",
       });
-
-      await folder.connect();
 
       const created = [...drive.files.values()].filter(
         (file) => file.mimeType === FOLDER_MIME_TYPE,
@@ -85,20 +80,18 @@ describe("GoogleDriveFolder", () => {
       );
     });
 
-    it("connect reuses existing root folders", async () => {
+    it("getFolderHandle reuses existing root folders", async () => {
       const existing = drive.addFolder({
         id: "existing-root",
         name: "my-app",
         parentId: "appDataFolder",
       });
 
-      const folder = new GoogleDriveFolder({
+      await GoogleDriveFolder.getFolderHandle({
         oauth,
         space: "appDataFolder",
         rootFolderPath: "my-app",
       });
-
-      await folder.connect();
 
       const folders = [...drive.files.values()].filter(
         (file) =>
@@ -106,19 +99,6 @@ describe("GoogleDriveFolder", () => {
       );
       expect(folders).toHaveLength(1);
       expect(folders[0]?.id).toBe(existing.id);
-    });
-
-    it("connect is idempotent", async () => {
-      const folder = new GoogleDriveFolder({
-        oauth,
-        space: "appDataFolder",
-        rootFolderPath: "my-app",
-      });
-
-      await folder.connect();
-      const requestCountAfterFirst = drive.requests.length;
-      await folder.connect();
-      expect(drive.requests.length).toBe(requestCountAfterFirst);
     });
 
     it("files lists only files non-recursively with appDataFolder spaces param", async () => {
@@ -135,12 +115,11 @@ describe("GoogleDriveFolder", () => {
         parentId: "sub-folder",
       });
 
-      const folder = new GoogleDriveFolder({
+      const folder = await GoogleDriveFolder.getFolderHandle({
         oauth,
         space: "appDataFolder",
         rootFolderPath: "my-app",
       });
-      await folder.connect();
 
       expect((await folder.files()).map((file) => file.name)).toEqual([
         "a.json",
@@ -155,12 +134,11 @@ describe("GoogleDriveFolder", () => {
     });
 
     it("write, read, exists, and deleteByPath round-trip", async () => {
-      const folder = new GoogleDriveFolder({
+      const folder = await GoogleDriveFolder.getFolderHandle({
         oauth,
         space: "appDataFolder",
         rootFolderPath: "my-app",
       });
-      await folder.connect();
 
       const fileBlob = new Blob(['{"hello":"world"}'], {
         type: "application/json",
@@ -177,12 +155,11 @@ describe("GoogleDriveFolder", () => {
     });
 
     it("write creates missing parent folders on demand", async () => {
-      const folder = new GoogleDriveFolder({
+      const folder = await GoogleDriveFolder.getFolderHandle({
         oauth,
         space: "appDataFolder",
         rootFolderPath: "my-app",
       });
-      await folder.connect();
 
       await folder.write(
         "archive/2024/data.json",
@@ -194,12 +171,11 @@ describe("GoogleDriveFolder", () => {
     });
 
     it("mkdir creates nested folders under root", async () => {
-      const folder = new GoogleDriveFolder({
+      const folder = await GoogleDriveFolder.getFolderHandle({
         oauth,
         space: "appDataFolder",
         rootFolderPath: "my-app",
       });
-      await folder.connect();
 
       await folder.mkdir("outbox/pending");
 
@@ -222,12 +198,11 @@ describe("GoogleDriveFolder", () => {
         parentId: root.id,
       });
 
-      const folder = new GoogleDriveFolder({
+      const folder = await GoogleDriveFolder.getFolderHandle({
         oauth,
         space: "appDataFolder",
         rootFolderPath: "my-app",
       });
-      await folder.connect();
 
       const requestsBefore = drive.requests.length;
       await folder.deleteById(file.id);
@@ -248,39 +223,25 @@ describe("GoogleDriveFolder", () => {
       drive.addFolder({ id: "dup-1", name: "inbox", parentId: root.id });
       drive.addFolder({ id: "dup-2", name: "inbox", parentId: root.id });
 
-      const folder = new GoogleDriveFolder({
-        oauth,
-        space: "appDataFolder",
-        rootFolderPath: "my-app/inbox",
-      });
-
-      await expect(folder.connect()).rejects.toThrow(DriveAmbiguousPathError);
-    });
-
-    it("throws when used before connect", async () => {
-      const folder = new GoogleDriveFolder({
-        oauth,
-        space: "appDataFolder",
-        rootFolderPath: "my-app",
-      });
-
-      await expect(folder.files()).rejects.toThrow(
-        "Not connected. Call connect() first.",
-      );
+      await expect(
+        GoogleDriveFolder.getFolderHandle({
+          oauth,
+          space: "appDataFolder",
+          rootFolderPath: "my-app/inbox",
+        }),
+      ).rejects.toThrow(DriveAmbiguousPathError);
     });
   });
 
   describe("drive space", () => {
     const oauth = createMockOAuth(DRIVE_FILE_SCOPE);
 
-    it("connect creates root under My Drive with drive spaces param", async () => {
-      const folder = new GoogleDriveFolder({
+    it("getFolderHandle creates root under My Drive with drive spaces param", async () => {
+      await GoogleDriveFolder.getFolderHandle({
         oauth,
         space: "drive",
         rootFolderPath: "shared-sync",
       });
-
-      await folder.connect();
 
       const created = [...drive.files.values()].find(
         (file) => file.name === "shared-sync",
@@ -306,12 +267,11 @@ describe("GoogleDriveFolder", () => {
         parentId: appDataFolderRoot.id,
       });
 
-      const folder = new GoogleDriveFolder({
+      const folder = await GoogleDriveFolder.getFolderHandle({
         oauth,
         space: "drive",
         rootFolderPath: "public",
       });
-      await folder.connect();
 
       await folder.write(
         "visible.json",

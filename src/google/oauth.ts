@@ -111,14 +111,14 @@ export const getOAuthSingleton = (function () {
 
       if (!this.loadedTokensAreValid()) {
         try {
-          await this.acquireAccessToken({ prompt: "none" });
+          await this.acquireAccessToken();
           if (this.loadedTokensAreValid()) return;
         } catch {
           // fall through to interactive sign-in
         }
 
         try {
-          await this.acquireAccessToken({ prompt: "login" });
+          await this.acquireAccessToken(false);
         } catch {
           // login failed or was dismissed
         }
@@ -241,27 +241,23 @@ export const getOAuthSingleton = (function () {
       return this.tokenClient;
     }
 
-    private acquireAccessToken(options: {
-      prompt: "none" | "login";
-    }): Promise<void> {
+    private acquireAccessToken(silentLogin = true): Promise<void> {
       if (this.acquireInFlight) return this.acquireInFlight;
 
-      this.acquireInFlight = this.requestAccessToken(options).finally(() => {
-        this.acquireInFlight = null;
-      });
+      this.acquireInFlight = this.requestAccessToken(silentLogin).finally(
+        () => {
+          this.acquireInFlight = null;
+        },
+      );
       return this.acquireInFlight;
     }
 
-    private async requestAccessToken(options: {
-      prompt: "none" | "login";
-    }): Promise<void> {
+    private async requestAccessToken(silentLogin: boolean): Promise<void> {
       const client = await this.ensureTokenClient();
 
       return new Promise<void>((resolve, reject) => {
         this.tokenRequest = { resolve, reject };
-        client.requestAccessToken(
-          options.prompt === "none" ? { prompt: "none" } : undefined,
-        );
+        client.requestAccessToken(silentLogin ? { prompt: "" } : undefined);
       });
     }
   }
