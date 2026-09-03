@@ -4,9 +4,10 @@ import {
   MessageExistsError,
 } from "./errors/index.ts";
 import {
-  GoogleDriveClient,
+  GoogleDriveFolder,
   mimeToExtension,
   supportedMimeType,
+  type DriveSpace,
   type GoogleOAuth,
 } from "./google";
 
@@ -17,8 +18,11 @@ export interface DriveMessage {
   isError?: boolean;
 }
 
+export type DriveSocketClientType = "single-tenant" | "multi-tenant";
+
 export interface DriveSocketConfig {
-  folderName: string;
+  clientType: DriveSocketClientType;
+  rootPath: string;
   pollIntervalInMs: number;
   maxFiles: number;
 }
@@ -27,21 +31,21 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function folderFilesQuery(parentFolderId: string): string {
-  return `'${parentFolderId}' in parents and trashed=false`;
+function spaceForClientType(clientType: DriveSocketClientType): DriveSpace {
+  return clientType === "single-tenant" ? "appDataFolder" : "drive";
 }
 
 export class DriveSocket {
-  private readonly gDriveClient: GoogleDriveClient;
+  private readonly folder: GoogleDriveFolder;
 
-  private folderId: string | null = null;
+  private connected = false;
   private pollLoopRunning = false;
   private pollLoopTask: Promise<void> | null = null;
   private onReceiveCallback: ((messages: DriveMessage[]) => void) | null = null;
 
   constructor(
     private readonly config: DriveSocketConfig,
-    private readonly oauth: GoogleOAuth,
+    oauth: GoogleOAuth,
   ) {
     if (config.pollIntervalInMs <= 0) {
       throw new RangeError("pollIntervalInMs must be > 0");
@@ -49,15 +53,20 @@ export class DriveSocket {
     if (config.maxFiles < 0) {
       throw new RangeError("maxFiles must be >= 0");
     }
-    if (!config.folderName) {
-      throw new RangeError("folderName must not be empty");
+    if (!config.rootPath) {
+      throw new RangeError("rootPath must not be empty");
     }
 
-    this.gDriveClient = new GoogleDriveClient(this.oauth);
+    this.folder = new GoogleDriveFolder({
+      oauth,
+      space: spaceForClientType(config.clientType),
+      rootFolderPath: config.rootPath,
+    });
   }
 
   async connect(): Promise<void> {
-    await this.ensureFolderId();
+    await this.folder.connect();
+    this.connected = true;
   }
 
   onReceive(callback: (messages: DriveMessage[]) => void): void {
@@ -67,7 +76,7 @@ export class DriveSocket {
   async disconnect(): Promise<void> {
     this.pollLoopRunning = false;
     this.onReceiveCallback = null;
-    this.folderId = null;
+    this.connected = false;
   }
 
   get isRunning(): boolean {
@@ -79,9 +88,7 @@ export class DriveSocket {
   }
 
   start(): void {
-    if (!this.folderId) {
-      throw new Error("Not connected. Call connect() first.");
-    }
+    this.assertConnected();
     if (!this.onReceiveCallback) {
       throw new Error(
         "No receive callback registered. Call onReceive() first.",
@@ -115,46 +122,36 @@ export class DriveSocket {
       );
     }
 
-    const folderId = await this.ensureFolderId();
-    if (await this.gDriveClient.fileExists(fileName, folderId)) {
+    this.assertConnected();
+    if (await this.folder.exists(fileName)) {
       throw new MessageExistsError(fileName);
     }
 
-    const saved = await this.gDriveClient.saveNewFile(
-      fileName,
-      mimeType,
-      fileBlob,
-      folderId,
-    );
+    const saved = await this.folder.write(fileName, fileBlob, mimeType);
     this.pruneToMaxFiles().catch(() => {});
     return { ...saved, fileBlob };
   }
 
   async delete(messageId: string): Promise<void> {
-    await this.ensureFolderId();
-    await this.gDriveClient.deleteFile(messageId);
+    this.assertConnected();
+    await this.folder.deleteById(messageId);
+  }
+
+  private assertConnected(): void {
+    if (!this.connected) {
+      throw new Error("Not connected. Call connect() first.");
+    }
   }
 
   private async pruneToMaxFiles(): Promise<void> {
-    const folderId = await this.ensureFolderId();
-    const files = this.sortFilesByCreatedTimeDesc(
-      await this.gDriveClient.listAllFiles(folderFilesQuery(folderId)),
-    );
+    const files = this.sortFilesByCreatedTimeDesc(await this.folder.files());
 
     if (files.length <= this.config.maxFiles) return;
 
     const toDelete = files.slice(this.config.maxFiles);
     for (const file of toDelete) {
-      await this.gDriveClient.deleteFile(file.id);
+      await this.folder.deleteById(file.id);
     }
-  }
-
-  private async ensureFolderId(): Promise<string> {
-    if (this.folderId) return this.folderId;
-    this.folderId = await this.gDriveClient.ensureAppDataFolder(
-      this.config.folderName,
-    );
-    return this.folderId;
   }
 
   private sortFilesByCreatedTimeDesc<
@@ -166,16 +163,12 @@ export class DriveSocket {
     });
   }
 
-  private async downloadFolderMessages(
-    folderId: string,
-  ): Promise<DriveMessage[]> {
-    const files = this.sortFilesByCreatedTimeDesc(
-      await this.gDriveClient.listAllFiles(folderFilesQuery(folderId)),
-    );
+  private async downloadFolderMessages(): Promise<DriveMessage[]> {
+    const files = this.sortFilesByCreatedTimeDesc(await this.folder.files());
     return Promise.all(
       files.map(async (file) => {
         try {
-          const fileBlob = await this.gDriveClient.downloadFile(file.id);
+          const fileBlob = await this.folder.read(file.name);
           return { id: file.id, name: file.name, fileBlob };
         } catch {
           return {
@@ -191,9 +184,9 @@ export class DriveSocket {
 
   private async runPollLoop(): Promise<void> {
     while (this.pollLoopRunning) {
-      if (!this.folderId || !this.onReceiveCallback) break;
+      if (!this.connected || !this.onReceiveCallback) break;
       try {
-        const messages = await this.downloadFolderMessages(this.folderId);
+        const messages = await this.downloadFolderMessages();
 
         if (this.onReceiveCallback) {
           this.onReceiveCallback(messages);

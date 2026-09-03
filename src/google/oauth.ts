@@ -39,6 +39,10 @@ export const getOAuthSingleton = (function () {
       await this.ensureUserIsLoggedIn();
     }
 
+    getConfiguredScopes(): string {
+      return this.googleOAuthTokenScopes;
+    }
+
     async authorizedFetch(url: string, init?: RequestInit): Promise<Response> {
       await this.ensureUserIsLoggedIn();
       let response = await this.fetchWithAccessToken(url, init);

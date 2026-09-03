@@ -23,15 +23,26 @@ import {
 } from "./mocks/oauth-harness.ts";
 import { getOAuthSingleton } from "../src/google/oauth.ts";
 
+const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+
 function defaultConfig(
   overrides: Partial<DriveSocketConfig> = {},
 ): DriveSocketConfig {
   return {
-    folderName: "messages",
+    clientType: "single-tenant",
+    rootPath: "messages",
     pollIntervalInMs: 100,
     maxFiles: 10,
     ...overrides,
   };
+}
+
+function createMockOAuth(scopes: string): GoogleOAuth {
+  return {
+    getConfiguredScopes: () => scopes,
+    authenticate: async () => {},
+    authorizedFetch: (url, init) => fetch(url, init),
+  } as GoogleOAuth;
 }
 
 function installLocalStorageMock(): { storage: Map<string, string> } {
@@ -58,9 +69,7 @@ describe("DriveSocket", () => {
   let oauth: GoogleOAuth;
   const openSockets: DriveSocket[] = [];
 
-  function createSocket(
-    overrides: Partial<DriveSocketConfig> = {},
-  ): DriveSocket {
+  function createSocket(overrides: Partial<DriveSocketConfig> = {}): DriveSocket {
     const socket = new DriveSocket(defaultConfig(overrides), oauth);
     openSockets.push(socket);
     return socket;
@@ -98,20 +107,81 @@ describe("DriveSocket", () => {
   describe("config validation", () => {
     it("rejects non-positive pollIntervalInMs", () => {
       expect(
-        () => new DriveSocket(defaultConfig({ pollIntervalInMs: 0 }), oauth),
+        () =>
+          new DriveSocket(
+            defaultConfig({ pollIntervalInMs: 0 }),
+            createMockOAuth(DRIVE_APPDATA_SCOPE),
+          ),
       ).toThrow("pollIntervalInMs must be > 0");
     });
 
     it("rejects negative maxFiles", () => {
       expect(
-        () => new DriveSocket(defaultConfig({ maxFiles: -1 }), oauth),
+        () =>
+          new DriveSocket(
+            defaultConfig({ maxFiles: -1 }),
+            createMockOAuth(DRIVE_APPDATA_SCOPE),
+          ),
       ).toThrow("maxFiles must be >= 0");
     });
 
-    it("rejects empty folderName", () => {
+    it("rejects empty rootPath", () => {
       expect(
-        () => new DriveSocket(defaultConfig({ folderName: "" }), oauth),
-      ).toThrow("folderName must not be empty");
+        () =>
+          new DriveSocket(
+            defaultConfig({ rootPath: "" }),
+            createMockOAuth(DRIVE_APPDATA_SCOPE),
+          ),
+      ).toThrow("rootPath must not be empty");
+    });
+  });
+
+  describe("clientType", () => {
+    it("single-tenant uses appDataFolder space", async () => {
+      addMessagesFolder();
+      const socket = createSocket({ clientType: "single-tenant", rootPath: "messages" });
+      await connectSocket(socket);
+
+      await socket.push(new Blob(["{}"]), {
+        mimeType: "application/json",
+        fileName: "tenant.json",
+      });
+
+      const listRequest = drive.requests.find(
+        (request) =>
+          request.method === "GET" && request.url.includes("spaces=appDataFolder"),
+      );
+      expect(listRequest).toBeDefined();
+    });
+
+    it("multi-tenant uses drive space", async () => {
+      clearGoogleOAuthMock();
+      installGoogleOAuthMock();
+      oauth = createMockOAuth(DRIVE_FILE_SCOPE) as GoogleOAuth;
+
+      const socket = new DriveSocket(
+        defaultConfig({ clientType: "multi-tenant", rootPath: "shared-sync" }),
+        oauth,
+      );
+      openSockets.push(socket);
+      await oauth.authenticate();
+      await socket.connect();
+
+      await socket.push(new Blob(["{}"]), {
+        mimeType: "application/json",
+        fileName: "sync.json",
+      });
+
+      const listRequest = drive.requests.find(
+        (request) =>
+          request.method === "GET" && request.url.includes("spaces=drive"),
+      );
+      expect(listRequest).toBeDefined();
+
+      const created = [...drive.files.values()].find(
+        (file) => file.name === "shared-sync",
+      );
+      expect(created?.parentId).toBe("root");
     });
   });
 
@@ -172,11 +242,11 @@ describe("DriveSocket", () => {
       );
     });
 
-    it("connect resolves folder setup via lazy oauth on drive api calls", async () => {
+    it("connect resolves folder setup after authenticate", async () => {
       addMessagesFolder();
       const socket = createSocket();
 
-      await socket.connect();
+      await connectSocket(socket);
 
       socket.onReceive(() => {});
       expect(() => socket.start()).not.toThrow();
@@ -270,12 +340,9 @@ describe("DriveSocket", () => {
 
       const socket = createSocket({ pollIntervalInMs: 50_000 });
 
-      await expect(
-        socket.push(new Blob(["{}"]), {
-          mimeType: "application/json",
-          fileName: "a.json",
-        }),
-      ).rejects.toBeInstanceOf(NotAuthenticatedError);
+      await expect(socket.connect()).rejects.toBeInstanceOf(
+        NotAuthenticatedError,
+      );
     });
 
     it("uploads into the configured appData subfolder", async () => {
@@ -725,7 +792,7 @@ describe("DriveSocket", () => {
 
       const socket = createSocket({ pollIntervalInMs: 50_000 });
 
-      await expect(socket.delete("msg-1")).rejects.toBeInstanceOf(
+      await expect(socket.connect()).rejects.toBeInstanceOf(
         NotAuthenticatedError,
       );
     });

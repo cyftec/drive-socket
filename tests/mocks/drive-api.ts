@@ -45,11 +45,74 @@ function matchesDriveQuery(file: StoredFile, query: string): boolean {
   );
   if (folderMimeMatch && file.mimeType !== FOLDER_MIME_TYPE) return false;
 
+  const trashedMatch = query.match(/trashed=false/);
+  if (trashedMatch && (file as StoredFile & { trashed?: boolean }).trashed) {
+    return false;
+  }
+
   return true;
+}
+
+function isFileInSpace(
+  file: StoredFile,
+  files: Map<string, StoredFile>,
+  space: string,
+): boolean {
+  let current: StoredFile | undefined = file;
+  const visited = new Set<string>();
+
+  while (current) {
+    if (current.parentId === "appDataFolder") return space === "appDataFolder";
+    if (current.parentId === "root") return space === "drive";
+    if (visited.has(current.id)) return false;
+    visited.add(current.id);
+    current = files.get(current.parentId);
+  }
+
+  return false;
 }
 
 function isFolderContentsListQuery(query: string): boolean {
   return /'[^']+' in parents and trashed=false$/.test(query);
+}
+
+function parseMultipartUpload(raw: string): {
+  name: string;
+  mimeType: string;
+  parentId: string;
+  fileBlob: Blob;
+} {
+  let name = "uploaded.bin";
+  let mimeType = "application/octet-stream";
+  let parentId = "appDataFolder";
+  let fileBlob = new Blob();
+
+  const nameMatch = raw.match(/"name":"([^"]+)"/);
+  const mimeMatch = raw.match(/"mimeType":"([^"]+)"/);
+  const parentMatch = raw.match(/"parents":\["([^"]+)"/);
+  if (nameMatch?.[1]) name = nameMatch[1];
+  if (mimeMatch?.[1]) mimeType = mimeMatch[1];
+  if (parentMatch?.[1]) parentId = parentMatch[1];
+
+  const boundaryMatch = raw.match(/^--([^\r\n]+)\r\n/);
+  if (boundaryMatch?.[1]) {
+    const boundary = boundaryMatch[1];
+    const parts = raw.split(`--${boundary}`);
+    const filePart = parts.find(
+      (part) =>
+        part.includes("Content-Type:") &&
+        !part.includes("application/json; charset=UTF-8"),
+    );
+    if (filePart) {
+      const contentStart = filePart.indexOf("\r\n\r\n");
+      if (contentStart !== -1) {
+        const content = filePart.slice(contentStart + 4).replace(/\r\n$/, "");
+        fileBlob = new Blob([content], { type: mimeType });
+      }
+    }
+  }
+
+  return { name, mimeType, parentId, fileBlob };
 }
 
 export class DriveApiFixture {
@@ -106,26 +169,20 @@ export class DriveApiFixture {
         let name = "uploaded.bin";
         let mimeType = "application/octet-stream";
         let parentId = "appDataFolder";
+        let fileBlob = new Blob();
         if (init?.body instanceof Blob) {
-          const raw = await init.body.text();
-          const nameMatch = raw.match(/"name":"([^"]+)"/);
-          const mimeMatch = raw.match(/"mimeType":"([^"]+)"/);
-          const parentMatch = raw.match(/"parents":\["([^"]+)"/);
-          if (nameMatch?.[1]) name = nameMatch[1];
-          if (mimeMatch?.[1]) mimeType = mimeMatch[1];
-          if (parentMatch?.[1]) parentId = parentMatch[1];
+          const parsed = parseMultipartUpload(await init.body.text());
+          name = parsed.name;
+          mimeType = parsed.mimeType;
+          parentId = parsed.parentId;
+          fileBlob = parsed.fileBlob;
         }
         const file: StoredFile = {
           id,
           name,
           createdTime: "2026-01-02T00:00:00.000Z",
           mimeType,
-          fileBlob:
-            mimeType === FOLDER_MIME_TYPE
-              ? new Blob()
-              : init?.body instanceof Blob
-                ? new Blob([init.body])
-                : new Blob(),
+          fileBlob,
           parentId,
         };
         this.files.set(id, file);
@@ -188,7 +245,17 @@ export class DriveApiFixture {
 
         const matched = [...this.files.values()]
           .filter((file) => matchesDriveQuery(file, query))
-          .map(({ id, name, createdTime }) => ({ id, name, createdTime }));
+          .filter((file) => {
+            const spaces = parsed.searchParams.get("spaces");
+            if (!spaces) return true;
+            return isFileInSpace(file, this.files, spaces);
+          })
+          .map(({ id, name, createdTime, mimeType }) => ({
+            id,
+            name,
+            createdTime,
+            mimeType,
+          }));
 
         return jsonResponse({ files: matched });
       }
